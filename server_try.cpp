@@ -60,6 +60,11 @@ int main(int argc, char** argv)
 	SOCKET new_sock;
 	new_sock = accept(s, (struct sockaddr*)&client, &c);
 
+	if (new_sock == INVALID_SOCKET) {
+		std::cout << "New socket invalid socket" << WSAGetLastError << std::endl;
+	}
+	else
+		std::cout << "Connection accepted" << std::endl;
 	/*while ((new_sock = accept(s, (struct sockaddr*)&client, &c)) == INVALID_SOCKET) {
 		std::cout << "connection accepted" << std::endl;
 
@@ -67,13 +72,18 @@ int main(int argc, char** argv)
 		char* message= "Hello Client";
 		send(new_sock, message, strlen(message), 0);
 	}*/
-
-	if (new_sock == INVALID_SOCKET) {
-		std::cout << "New socket invalid socket" << WSAGetLastError << std::endl;
+	
+	//recv data
+	char vect[512] = { 0 };
+	int recv_result = recv(new_sock, vect, 512, 0);
+	if (recv_result == SOCKET_ERROR) {
+		std::cout << "Error in Receiving: " << WSAGetLastError() << std::endl;
 	}
 	else
-		std::cout << "Connection accepted" << std::endl;
+		std::cout << recv_result << std::endl;
+	//////////////////////////////////////////
 
+	//Send data
 	char* message = "Hello Client";
 	send(new_sock, message, strlen(message), 0);
 	//////////////////////////////////
