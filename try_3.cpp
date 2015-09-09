@@ -5,12 +5,32 @@
 #include <iostream>
 #include <WS2tcpip.h>
 #include <string>
+#include <winapifamily.h>
 
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
 
 int main()
 {
+	//check if reg key exists
+	char* key = "hkey_local_machine\system\currentcontrolset\service\try_3";
+	HKEY hkey;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &hkey) != ERROR_SUCCESS)
+		std::cout << "Could not open reg key" << std::endl;
+
+	//locate HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\
+
+	//create registry
+	//Add key
+	//set Parameters key
+	//add value
+	/*Value Name: Application
+	 *Data Type:  REG_SZ
+	 *String:     <path>\<application.ext>
+	 */
+	//close registry editor
+
+
 	//Initialize Socket
 	WSAData version; //We need to check the version
 	WORD mkword = MAKEWORD(2, 2);
