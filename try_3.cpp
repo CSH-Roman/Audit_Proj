@@ -13,15 +13,16 @@
 int main()
 {
 	//check if reg key exists
-	char* key = "hkey_local_machine\system\currentcontrolset\service\try_3";
+	char* key = "SOFTWARE\\try_3";
 	HKEY hkey;
 	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &hkey) != ERROR_SUCCESS)
 		std::cout << "Could not open reg key" << std::endl;
-
-	//locate HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\
-
+	//locate HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services
 	//create registry
-	//Add key
+	if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, key, 0L, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL) != ERROR_SUCCESS)
+		std::cout << "Could not create reg key" << std::endl;
+	//Add key inside try_3 using the RegSetValueExA function
+
 	//set Parameters key
 	//add value
 	/*Value Name: Application
