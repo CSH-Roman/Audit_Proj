@@ -8,6 +8,7 @@
 #include <winapifamily.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <vector>
 
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
@@ -52,6 +53,54 @@ int reg_maker() {
 	return 0;
 }
 
+/*
+ *This function will split a string based on
+ *the character to passed to it and insert the
+ *parts into a vector
+ */
+void split(const std::string& s, char delim, std::vector<std::string>& v) {
+	std::string::size_type i = 0;
+	std::string::size_type j = s.find(delim);
+
+	while (j != std::string::npos) {
+		v.push_back(s.substr(i, j - i));
+		i = ++j;
+		j = s.find(delim, j);
+
+		if (j == std::string::npos)
+			v.push_back(s.substr(i, s.length()));
+	}
+}
+
+
+/*
+ *remove the spaces from each string in the vector
+ */
+void remover(std::vector<std::string>& v) {
+	for (int i = 0; i < v.size(); i++) {
+		std::string getting_changed = v[i];
+		std::string changed_str = "";
+		for (int i = 0; i < getting_changed.size(); i++) {
+			if (' ' != getting_changed[i]) {
+				changed_str += getting_changed[i];
+			}
+		}
+		v[i] = changed_str;
+	}
+}
+
+/*
+ *This will parse the output of a dir command
+ *and return a vector of Users directories
+ */
+void parser(const std::string res, std::vector<std::string>& v) {
+	split(res, '>', v);
+	remover(v);
+	//////////////do some math to figure out directory offset//////////////
+	for (int i = 0; i < v.size(); i++) {
+		std::cout << v[i] << std::endl;
+	}
+}
 
 /*
  *This function prints the directories/files of the Users
@@ -75,6 +124,8 @@ int startup_finder() {
 
 	std::cout << result << std::endl;
 	//////////////NEED TO PARSE/////////////////
+	std::vector<std::string> parts;
+	parser(result, parts);
 
 	return 0;
 }
