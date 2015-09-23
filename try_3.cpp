@@ -90,16 +90,39 @@ void remover(std::vector<std::string>& v) {
 }
 
 /*
+ *Checks to see in character matched
+ *a character in the alphabet
+ */
+int matcher(char firstletter) {
+	std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	int res = alphabet.find(firstletter);
+
+	return res;
+}
+
+/*
  *This will parse the output of a dir command
  *and return a vector of Users directories
  */
-void parser(const std::string res, std::vector<std::string>& v) {
-	split(res, '>', v);
+std::string parser(const std::string res, std::vector<std::string> v) {
+	std::string directories = "";
+	split(res, '\n', v);
 	remover(v);
-	//////////////do some math to figure out directory offset//////////////
+	
 	for (int i = 0; i < v.size(); i++) {
-		std::cout << v[i] << std::endl;
+		int temp = v[i].find('>');
+		if (temp == 21) {
+			int res = matcher(v[i][22]);
+			if (res > -1) {
+				for (int x = 22; x < v[i].size(); x++) {
+					directories = directories + v[i][x];
+				}
+			}
+		}
+		directories += " ";
 	}
+	
+	return directories;
 }
 
 /*
@@ -110,6 +133,8 @@ int startup_finder() {
 	const char* cmd = "dir C:\\Users";
 	char buffer[128];
 	std::string result = "";
+	std::vector<std::string> parts;
+	std::vector<std::string> folder;
 	FILE* _pipe = _popen(cmd, "r");
 
 	if (!_pipe) {
@@ -122,10 +147,15 @@ int startup_finder() {
 	}
 	_pclose(_pipe);
 
-	std::cout << result << std::endl;
-	//////////////NEED TO PARSE/////////////////
-	std::vector<std::string> parts;
-	parser(result, parts);
+	
+	result = parser(result, parts);
+	split(result, ' ', parts);
+	for (int i = 0; i < parts.size(); i++) {
+		int rest = matcher(parts[i][0]);
+		if (rest != -1) {
+			folder.push_back(parts[i]);
+		}
+	}
 
 	return 0;
 }
