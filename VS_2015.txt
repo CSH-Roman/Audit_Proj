@@ -1,0 +1,14 @@
+Include the file pcap.h at the beginning of every source file that uses the functions exported by library.
+
+Go to Configuration Properties | C/C++ | PREPROCESSOR.
+If your program uses Win32 specific functions of WinPcap, remember to include WPCAP among the preprocessor definitions.
+If your program uses the remote capture capabilities of WinPcap, add HAVE_REMOTE among the preprocessor definitions. Do not include remote-ext.h directly in your source files
+
+Go to Configuration Properties | C/C++ | General.
+For Additional Include Directories add the relative path: ..\WpdPack\Include
+
+Go to Configuration Properties | Linker | General.
+For Additional Library Directories enter the following: ..\WpdPack\Lib
+
+Go to Configuration Properties | Linker | Input.
+For Additional Dependencies, add the following: C:\ADD FULL PATH TO FILE\winpcap.lib; C:\ADD FULL PATH TO FILE\Packet.lib;
