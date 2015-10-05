@@ -12,3 +12,9 @@ For Additional Library Directories enter the following: ..\WpdPack\Lib
 
 Go to Configuration Properties | Linker | Input.
 For Additional Dependencies, add the following: C:\ADD FULL PATH TO FILE\winpcap.lib; C:\ADD FULL PATH TO FILE\Packet.lib;
+
+Install correct winpcap driver
+---Commands for Winpcap---
+net start npf
+net stop npf
+-cmd must be ran as admin

