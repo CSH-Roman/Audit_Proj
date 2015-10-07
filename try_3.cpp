@@ -227,21 +227,49 @@ int size_of_list(pcap_if_t*  list) {
  *returns: 0 if successful otherwise returns -1
  */
 int capture_em_packets() {
-	/////////////////////Remember to install the winpcap.dll/////////////////
-	pcap_if_t* all_devices;	//first point of interface list
-	char error_msg[PCAP_ERRBUF_SIZE]; //error message buffer
+	pcap_if_t* all_devices;				//first point of interface list
+	pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
+	struct pcap_pkthdr *pktHeader;		//stores packet header information
+	const u_char *pkt_data;				//stores packet data
+	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
+	time_t local_time;					//contain time in ts struct
+	struct tm ltime;					//contain hours minutes seconds of time
 
+	//returns on error
 	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
 		std::cout << "did not get device list" << std::endl;
 		return -1;
 	}
 	
+	//returns if no interfaces
 	if (size_of_list(all_devices) == 0) {
 		return -1;
 	}
 
 	//select interface
-	/////////////////////////////////////////////////////////////////////////
+	//In this case inteface selected is the second interface
+	pcap_if_t* device = all_devices;
+
+	//open dev list
+	if ((adhandle = pcap_open(device->name, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, NULL, error_msg)) == NULL) {
+		pcap_freealldevs(all_devices);
+		return -1;
+	}
+	//free dev list
+	pcap_freealldevs(all_devices);
+
+	//capture packets on dev
+	while (true) {
+		pcap_next_ex(adhandle, &pktHeader, &pkt_data);
+		
+		//inspect packet
+		if (pktHeader->len > 0) {
+			local_time = pktHeader->ts.tv_sec;
+			localtime_s(&ltime, &local_time);
+			std::cout << pktHeader->len << " length " << ltime.tm_hour << " hour" << ltime.tm_min << " min" << ltime.tm_sec << " sec" << std::endl;
+		}
+	}
+
 	return 0;
 }
 
