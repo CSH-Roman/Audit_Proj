@@ -14,6 +14,50 @@
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
 
+/*
+ *This struct will be used to decode IPv6 headers
+ */
+typedef struct IP_header {
+	unsigned char ip_version : 4;	//4 bits IPv6 version field
+	unsigned char traffic_cls;		//8 bits traffic class
+	unsigned int flow_label : 20;	//20 bits flow label in packet
+	unsigned char ttl;				//8 bits time to live field
+	unsigned char next_header;		//8 bits next header
+	unsigned int pay_len :16;		//16 bits payload length field
+	//need to figure out that whole address thing
+};
+
+
+/* 4 bytes IP address */
+typedef struct ip_address {
+	u_char byte1;
+	u_char byte2;
+	u_char byte3;
+	u_char byte4;
+}ip_address;
+
+typedef struct IPv4 {
+	u_char  ver_ihl;        // Version (4 bits) + Internet header length (4 bits)
+	u_char  tos;            // Type of service 
+	u_short tlen;           // Total length 
+	u_short identification; // Identification
+	u_short flags_fo;       // Flags (3 bits) + Fragment offset (13 bits)
+	u_char  ttl;            // Time to live
+	u_char  proto;          // Protocol
+	u_short crc;            // Header checksum
+	ip_address  saddr;      // Source address
+	ip_address  daddr;      // Destination address
+	u_int   op_pad;         // Option + Padding
+};
+
+/*
+ *This struct will be used to decode Ethernet headers
+ */
+typedef struct eth_header {
+	u_char dest[6];
+	u_char src[6];
+	u_short type;
+};
 
 /*
 * This function will edit registries in order to
@@ -223,6 +267,33 @@ int size_of_list(pcap_if_t*  list) {
 }
 
 /*
+ *This function will decapsulate packets
+ *and call functions if needed
+ *renturns nothing 
+ */
+void decapsulate(const u_char *data, int size) {
+	eth_header* eth_hdr;
+	eth_hdr = (eth_header*)data;
+	IPv4* ih;
+
+	if (ntohs(eth_hdr->type) == 0x800) {
+		/* retireve the position of the ip header */
+		ih = (IPv4 *)(data + 14); //length of ethernet header
+								  /* print ip addresses and udp ports */
+		printf("%d.%d.%d.%d.%d -> %d.%d.%d.%d.%d\n",
+			ih->saddr.byte1,
+			ih->saddr.byte2,
+			ih->saddr.byte3,
+			ih->saddr.byte4,
+			ih->daddr.byte1,
+			ih->daddr.byte2,
+			ih->daddr.byte3,
+			ih->daddr.byte4);
+	}
+}
+
+
+/*
  *This function will take care of packet capture using winpcap library
  *returns: 0 if successful otherwise returns -1
  */
@@ -234,6 +305,8 @@ int capture_em_packets() {
 	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
 	time_t local_time;					//contain time in ts struct
 	struct tm ltime;					//contain hours minutes seconds of time
+	struct bpf_program opcode;			//this will contain useful shit
+	u_int netmask;						//this will contain the netmask of the interface capturing
 
 	//returns on error
 	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
@@ -255,6 +328,20 @@ int capture_em_packets() {
 		pcap_freealldevs(all_devices);
 		return -1;
 	}
+
+	//compile filter
+	netmask = ((struct sockaddr_in*) (device->addresses->netmask))->sin_addr.S_un.S_addr;
+	if (pcap_compile(adhandle, &opcode, "ip", 1, netmask) < 0) {
+		pcap_freealldevs(all_devices);
+		return -1;
+	}
+
+	//set filter
+	if (pcap_setfilter(adhandle, &opcode) < 0) {
+		pcap_freealldevs(all_devices);
+		return -1;
+	}
+
 	//free dev list
 	pcap_freealldevs(all_devices);
 
@@ -266,7 +353,8 @@ int capture_em_packets() {
 		if (pktHeader->len > 0) {
 			local_time = pktHeader->ts.tv_sec;
 			localtime_s(&ltime, &local_time);
-			std::cout << pktHeader->len << " length " << ltime.tm_hour << " hour" << ltime.tm_min << " min" << ltime.tm_sec << " sec" << std::endl;
+			//std::cout << pktHeader->len << " length " << ltime.tm_hour << " hour" << ltime.tm_min << " min" << ltime.tm_sec << " sec" << std::endl;
+			decapsulate(pkt_data, pktHeader->caplen);
 		}
 	}
 
