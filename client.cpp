@@ -5,9 +5,20 @@
 #include <WS2tcpip.h>
 #include <iostream>
 #include <string>
+#include <IPHlpApi.h>
 #include "pcap.h"
 
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
+#pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
+
+typedef struct mac_values {
+	int value0;
+	int value1;
+	int value2;
+	int value3;
+	int value4;
+	int value5;
+}mac_values;
 
 /*
 *This function will find the size of lists created by functions in wpdpack libs
@@ -63,12 +74,56 @@ pcap_t* get_handle() {
 }
 
 /*
+ *This function will get the mac address of the local machine
+ *returns: the mac address of local machine
+ */
+void get_mac(mac_values** values) {
+	IP_ADAPTER_INFO *info = NULL, *pos;
+	DWORD size = 0;
+
+	GetAdaptersInfo(info, &size);
+
+	info = (IP_ADAPTER_INFO *)malloc(size);
+	
+	GetAdaptersInfo(info, &size);
+
+	pos = info;
+	if(pos != NULL) {
+		printf("\n%s\n\t", pos->Description);
+		printf("%2.2x", pos->Address[0]);
+		(*values)->value0 = (int)pos->Address[0];
+		for (int i = 1; i < pos->AddressLength; i++) {
+			printf(":%2.2x", pos->Address[i]);
+			switch (i) {
+				case 1:
+					(*values)->value1 = (int)pos->Address[i];
+					break;
+				case 2:
+					(*values)->value2 = (int)pos->Address[i];
+					break;
+				case 3:
+					(*values)->value3 = (int)pos->Address[i];
+					break;
+				case 4:
+					(*values)->value4 = (int)pos->Address[i];
+					break;
+				case 5:
+					(*values)->value5 = (int)pos->Address[i];
+					break;
+				default:
+					break;
+			}
+		}
+	}
+	free(info);
+}
+
+/*
  *Used to send packets to server using cc
  */
 int send_packet(pcap_t* fp) {
 	u_char packet[100];
 
-	//need to convert hexidecimal to decimal
 	// set mac destination to 
 	packet[0] = 1;
 	packet[1] = 1;
@@ -78,7 +133,7 @@ int send_packet(pcap_t* fp) {
 	packet[5] = 1;
 
 	// set mac source to 
-	packet[6] = 40;
+	packet[6] = 'E0';
 	packet[7] = 25;
 	packet[8] = 20;
 	packet[9] = 90;
@@ -102,8 +157,25 @@ int send_packet(pcap_t* fp) {
 
 int main()
 {
+	mac_values* values= (mac_values*) malloc((sizeof(int) *6));
+	get_mac(&values);
+	u_char packet[100];
+
+	// need hex converter function 
+	packet[0] = values->value0;
+	packet[1] = values->value1;
+	packet[2] = values->value2;
+	packet[3] = values->value3;
+	packet[4] = values->value4;
+	packet[5] = values->value5;
+	free(values);
+
+	for (int i = 0; i < 6; i++) {
+		std::cout << packet[i] << std::endl;
+	}
+
 	//captures packets using winpcap driver
-	pcap_t* adhandle = get_handle();//device is pointer to list of devices
+	/*pcap_t* adhandle = get_handle();//device is pointer to list of devices
 	if (adhandle == NULL)
 		return -1;
 
@@ -111,7 +183,7 @@ int main()
 	//send dns packets
 	if (send_packet(adhandle) == -1) {
 		return -1;
-	}
+	}*/
 	int temp = 0;
 	std::cin >> temp;
     return 0;
