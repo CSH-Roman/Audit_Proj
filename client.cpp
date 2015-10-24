@@ -11,6 +11,7 @@
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
 
+//contains the values of mac address as integers
 typedef struct mac_values {
 	int value0;
 	int value1;
@@ -19,6 +20,7 @@ typedef struct mac_values {
 	int value4;
 	int value5;
 }mac_values;
+
 
 /*
 *This function will find the size of lists created by functions in wpdpack libs
@@ -75,40 +77,39 @@ pcap_t* get_handle() {
 
 /*
  *This function will get the mac address of the local machine
- *returns: the mac address of local machine
+ *and enter it into a values struct
+ *returns: the mac address of local machine in values struct
  */
 void get_mac(mac_values** values) {
 	IP_ADAPTER_INFO *info = NULL, *pos;
 	DWORD size = 0;
 
 	GetAdaptersInfo(info, &size);
-
 	info = (IP_ADAPTER_INFO *)malloc(size);
-	
 	GetAdaptersInfo(info, &size);
 
 	pos = info;
 	if(pos != NULL) {
-		printf("\n%s\n\t", pos->Description);
-		printf("%2.2x", pos->Address[0]);
-		(*values)->value0 = (int)pos->Address[0];
-		for (int i = 1; i < pos->AddressLength; i++) {
-			printf(":%2.2x", pos->Address[i]);
+		//printf("\n%s\n\t", pos->Description);
+		//printf("%2.2x", pos->Address[0]);
+		(*values)->value0 = pos->Address[0];
+		for (u_int i = 1; i < pos->AddressLength; i++) {
+			//printf("%2.2x", pos->Address[i]);
 			switch (i) {
 				case 1:
-					(*values)->value1 = (int)pos->Address[i];
+					(*values)->value1 = pos->Address[1];
 					break;
 				case 2:
-					(*values)->value2 = (int)pos->Address[i];
+					(*values)->value2 = pos->Address[2];
 					break;
 				case 3:
-					(*values)->value3 = (int)pos->Address[i];
+					(*values)->value3 = pos->Address[3];
 					break;
 				case 4:
-					(*values)->value4 = (int)pos->Address[i];
+					(*values)->value4 = pos->Address[4];
 					break;
 				case 5:
-					(*values)->value5 = (int)pos->Address[i];
+					(*values)->value5 = pos->Address[5];
 					break;
 				default:
 					break;
@@ -122,23 +123,29 @@ void get_mac(mac_values** values) {
  *Used to send packets to server using cc
  */
 int send_packet(pcap_t* fp) {
+	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	get_mac(&values);
 	u_char packet[100];
 
-	// set mac destination to 
-	packet[0] = 1;
-	packet[1] = 1;
-	packet[2] = 1;
-	packet[3] = 1;
-	packet[4] = 1;
-	packet[5] = 1;
 
-	// set mac source to 
-	packet[6] = 'E0';
-	packet[7] = 25;
-	packet[8] = 20;
-	packet[9] = 90;
-	packet[10] = 15;
-	packet[11] = 50;
+	////////get gateway ip address///////////
+	//arp -a > "C:\Path to file
+	//destination mac address
+	packet[0] = values->value0;
+	packet[1] = values->value1;
+	packet[2] = values->value2;
+	packet[3] = values->value3;
+	packet[4] = values->value4;
+	packet[5] = values->value5;
+	//source mac address
+	packet[6] = values->value0;
+	packet[7] = values->value1;
+	packet[8] = values->value2;
+	packet[9] = values->value3;
+	packet[10] = values->value4;
+	packet[11] = values->value5;
+	free(values);
+
 
 	/* Fill the rest of the packet */
 	for (int i = 12;i<100;i++)
@@ -157,33 +164,18 @@ int send_packet(pcap_t* fp) {
 
 int main()
 {
-	mac_values* values= (mac_values*) malloc((sizeof(int) *6));
-	get_mac(&values);
-	u_char packet[100];
-
-	// need hex converter function 
-	packet[0] = values->value0;
-	packet[1] = values->value1;
-	packet[2] = values->value2;
-	packet[3] = values->value3;
-	packet[4] = values->value4;
-	packet[5] = values->value5;
-	free(values);
-
-	for (int i = 0; i < 6; i++) {
-		std::cout << packet[i] << std::endl;
-	}
-
-	//captures packets using winpcap driver
-	/*pcap_t* adhandle = get_handle();//device is pointer to list of devices
+	//device is pointer to list of devices
+	pcap_t* adhandle = get_handle();
 	if (adhandle == NULL)
 		return -1;
 
+	//captures packets using winpcap driver
 	//capture ip traffic
+
 	//send dns packets
 	if (send_packet(adhandle) == -1) {
 		return -1;
-	}*/
+	}
 	int temp = 0;
 	std::cin >> temp;
     return 0;
