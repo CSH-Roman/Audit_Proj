@@ -7,6 +7,7 @@
 #include <string>
 #include <IPHlpApi.h>
 #include "pcap.h"
+#include <bitset>
 
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
@@ -145,10 +146,54 @@ int send_packet(pcap_t* fp) {
 	packet[10] = values->value4;
 	packet[11] = values->value5;
 	free(values);
-
+	//ethernet type IPv4
+	packet[12] = 8;
+	packet[13] = 0;
+	//version field and IHL
+	///////////Doesn't work properly//////////
+	std::bitset<8> vers(packet[14]);
+	//set ipv4: 1000 ihl: 1000
+	vers[6] = 1;
+	//set ihl equal 4
+	vers[2] = 1;
+	//packet[14] = 68;
+	//////////////////////////////////////////
+	//differentiated services
+	packet[15] = 0;
+	//total length =1500
+	packet[16] = 5;
+	packet[17] = 220;
+	//identification =19142
+	packet[18] = 74;
+	packet[19] = 198;
+	//flags don't fragment =010
+	packet[20] = 0;
+	/////Doesn't Work Properly/////
+	std::bitset<8> flags(packet[20]);
+	flags[6] = 1;
+	///////////////////////////////
+	//fragment offset
+	packet[21] = 0;
+	//TTL
+	packet[22] = 255;
+	//layer 4 protocol
+	packet[23] = 143;
+	//header checksum
+	packet[24] = 39;
+	packet[25] = 50;
+	//source ip address
+	packet[26] = 127;
+	packet[27] = 0;
+	packet[28] = 0;
+	packet[29] = 1;
+	//destination ip address
+	packet[30] = 127;
+	packet[31] = 0;
+	packet[32] = 0;
+	packet[33] = 1;
 
 	/* Fill the rest of the packet */
-	for (int i = 12;i<100;i++)
+	for (int i = 34;i<100;i++)
 	{
 		packet[i] = i % 256;
 	}
