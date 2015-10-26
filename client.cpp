@@ -126,7 +126,7 @@ void get_mac(mac_values** values) {
 int send_packet(pcap_t* fp) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[100];
+	u_char packet[102];
 
 
 	////////get gateway ip address///////////
@@ -146,18 +146,12 @@ int send_packet(pcap_t* fp) {
 	packet[10] = values->value4;
 	packet[11] = values->value5;
 	free(values);
+	
 	//ethernet type IPv4
 	packet[12] = 8;
 	packet[13] = 0;
 	//version field and IHL
-	///////////Doesn't work properly//////////
-	std::bitset<8> vers(packet[14]);
-	//set ipv4: 1000 ihl: 1000
-	vers[6] = 1;
-	//set ihl equal 4
-	vers[2] = 1;
-	//packet[14] = 68;
-	//////////////////////////////////////////
+	packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 	//differentiated services
 	packet[15] = 0;
 	//total length =1500
@@ -167,17 +161,13 @@ int send_packet(pcap_t* fp) {
 	packet[18] = 74;
 	packet[19] = 198;
 	//flags don't fragment =010
-	packet[20] = 0;
-	/////Doesn't Work Properly/////
-	std::bitset<8> flags(packet[20]);
-	flags[6] = 1;
-	///////////////////////////////
+	packet[20] = 64;
 	//fragment offset
 	packet[21] = 0;
 	//TTL
 	packet[22] = 255;
 	//layer 4 protocol
-	packet[23] = 143;
+	packet[23] = 17;  //must be set to detect layer 4 protocols
 	//header checksum
 	packet[24] = 39;
 	packet[25] = 50;
@@ -192,18 +182,116 @@ int send_packet(pcap_t* fp) {
 	packet[32] = 0;
 	packet[33] = 1;
 
-	/* Fill the rest of the packet */
-	for (int i = 34;i<100;i++)
+	//UDP Header
+	//source port
+	packet[34] = 0;
+	packet[35] = 53;
+	//destination port
+	packet[36] = 0;
+	packet[37] = 53;
+	//length in bytes of udp header
+	packet[38] = 0;
+	packet[39] = 68;
+	//checksum
+	packet[40] = 70;
+	packet[41] = 70;
+
+	//DNS Header
+	//id
+	packet[42] = 54;
+	packet[43] = 54;
+	//flags and opcodes
+	//128: response 0: standard query 0: not authority 0: truncate bit 0: recursion desired
+	packet[44] = 128;
+	//0: recusion available 0: z bit 0: authentication data 0: checking disabled 0: reply code
+	packet[45] = 0;
+	//total questions
+	packet[46] = 0;
+	packet[47] = 1;
+	//total answers
+	packet[48] = 0;
+	packet[49] = 1;
+	/////////////////ERROR WITH ORDER////////////////////
+	//authority rr
+	packet[50] = 0;
+	packet[51] = 0;
+	//additional rr
+	packet[52] = 0;
+	packet[53] = 0;
+	
+	//DNS Response Question and Answer
+	//Query Name www.hello.com
+	packet[54] = 3;
+	packet[55] = 119;
+	packet[56] = 119;
+	packet[57] = 119;
+	packet[58] = 5;
+	packet[59] = 104;
+	packet[60] = 101;
+	packet[61] = 108;
+	packet[62] = 108;
+	packet[63] = 111;
+	packet[64] = 3;
+	packet[65] = 99;
+	packet[66] = 111;
+	packet[67] = 109;
+	packet[68] = 0;
+	//type
+	packet[69] = 0;
+	packet[70] = 1;
+	//class
+	packet[71] = 0; 
+	packet[72] = 1; //internet
+	//Answer
+	//Name www.hello.com
+	packet[73] = 3;
+	packet[74] = 119;
+	packet[75] = 119;
+	packet[76] = 119;
+	packet[77] = 5;
+	packet[78] = 104;
+	packet[79] = 101;
+	packet[80] = 108;
+	packet[81] = 108;
+	packet[82] = 111;
+	packet[83] = 3;
+	packet[84] = 99;
+	packet[85] = 111;
+	packet[86] = 109;
+	packet[87] = 0;
+	//type
+	packet[88] = 0;
+	packet[89] = 1;
+	//class
+	packet[90] = 0;
+	packet[91] = 1;//internet
+	//time to live
+	packet[92] = 0;
+	packet[93] = 0;
+	packet[94] = 0;
+	packet[95] = 255;
+	//rdata length
+	packet[96] = 0;
+	packet[97] = 4;
+	//data ip address
+	packet[98] = 192;
+	packet[99] = 168;
+	packet[100] = 1;
+	packet[101] = 1;
+
+	/* Fill the rest of the packet 
+	for (int i = 97;i<100;i++)
 	{
 		packet[i] = i % 256;
-	}
+	}*/
 
 	/* Send down the packet */
-	if (pcap_sendpacket(fp, packet, 100 /* size */) != 0)
+	if (pcap_sendpacket(fp, packet, 102 /* size */) != 0)
 	{
 		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
 		return -1;
 	}
+	/////////////////////////////////////////////////////////////
 	return 0;
 }
 
