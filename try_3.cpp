@@ -345,33 +345,40 @@ void decapsulate(const u_char *data, int size) {
 		head_len = 8; //standard length of udp header is 8 bytes
 		dns_h = (dns_header *)((u_char*)uh + head_len);
 
-		std::cout << "Identifier " << dns_h->identifier << std::endl;
+		//std::cout << "Identifier " << dns_h->identifier << std::endl;
+		printf("Identifier %2.2x", dns_h->identifier);
 		//determine if the packet is a response or request
 		std::bitset<16> id(dns_h->flags_codes);
-		std::cout << id[0] << std::endl;
-		if (id[0] == 1) {
+		std::cout << "QR: " << id[7] << std::endl;//bytes swap lsb
+		if (id[7] == 1) {
 			//dns payload= pointer + dns header size
 			head_len = 12;
 			dns_pay = (dns_payload *)((u_char*)dns_h + head_len);
 
-			u_char* temp = (u_char*)dns_h + head_len;
+			u_char* domain_char = (u_char*)dns_h + head_len;
 			u_int index = 0;
 			//loop to the end of question field
-			while (*temp != 0) {
-				temp = (u_char*)dns_h + head_len + index;
-				//std::cout << temp << std::endl;
+			while (*domain_char != 0) {
+				domain_char = (u_char*)dns_h + head_len + index;
+				std::cout << domain_char << std::endl;
 				index++;
 			}
-			u_short* type = (u_short*)dns_h + head_len + index;
-			std::cout << *type << std::endl;
+			std::cout << index << std::endl;
+			u_char* type = (u_char*)dns_pay + index +1;//grab least sign bit
+			int lsb = (int)*type;
+			type = type - 1;//grab most sig bit
+			int msb = (int)*type;
+			msb = msb * 256;
+			int type_val = msb + lsb;
+			std::cout << "Type: " << type_val << std::endl;
 			//Use value returned by type for messages
 		}
 	}
 }
 
 /*
- *This function will take care of packet capture using winpcap library
- *returns: 0 if successful otherwise returns -1
+ *This function returns the device to capture on
+ *returns: device if successful otherwise returns NULL
  */
 pcap_if_t* capture_em_packets() {
 	pcap_if_t* all_devices;				//first point of interface list
@@ -439,14 +446,15 @@ int main()
 	pcap_freealldevs(device);
 
 	//capture packets on dev
-	while (true) {
-		pcap_next_ex(adhandle, &pktHeader, &pkt_data);
-
+	/////////infinite loop need to change///////////
+	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
+		
 		//inspect packet
 		if (pktHeader->len > 0) {
 			decapsulate(pkt_data, pktHeader->caplen);
 		}
 	}
+	///////////////////////////////////////////////
 
     return 0;
 }
