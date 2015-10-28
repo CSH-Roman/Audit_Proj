@@ -8,6 +8,7 @@
 #include <IPHlpApi.h>
 #include "pcap.h"
 #include <bitset>
+#include <vector>
 
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
@@ -22,6 +23,13 @@ typedef struct mac_values {
 	int value5;
 }mac_values;
 
+//contains the values of the ip address as ints
+typedef struct ip_addr {
+	int octet1;
+	int octet2;
+	int octet3;
+	int octet4;
+}ip_addr;
 
 /*
 *This function will find the size of lists created by functions in wpdpack libs
@@ -91,8 +99,7 @@ void get_mac(mac_values** values) {
 
 	pos = info;
 	if(pos != NULL) {
-		//printf("\n%s\n\t", pos->Description);
-		//printf("%2.2x", pos->Address[0]);
+		/////////interate over adapters///////////////
 		(*values)->value0 = pos->Address[0];
 		for (u_int i = 1; i < pos->AddressLength; i++) {
 			//printf("%2.2x", pos->Address[i]);
@@ -118,6 +125,73 @@ void get_mac(mac_values** values) {
 		}
 	}
 	free(info);
+}
+
+/*
+*This function will split a string based on
+*the character to passed to it and insert the
+*parts into a vector
+*/
+void split(const std::string& s, char delim, std::vector<std::string>& v) {
+	std::string::size_type i = 0;
+	std::string::size_type j = s.find(delim);
+
+	while (j != std::string::npos) {
+		v.push_back(s.substr(i, j - i));
+		i = ++j;
+		j = s.find(delim, j);
+
+		if (j == std::string::npos)
+			v.push_back(s.substr(i, s.length()));
+	}
+}
+
+/*
+ *Finds lines that contain ipv4 addresses
+ *returns: ipv4 addresses inside vector
+ */
+void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses) {
+	std::size_t found;
+	
+
+	for (int i = 0; i < lines_vect.size(); i++) {
+		found = lines_vect[i].find("IPv4");
+		if (found != std::string::npos) {
+			std::vector<std::string> name_ip;
+			std::vector<std::string> space_ip;
+			split(lines_vect[i], ':', name_ip);
+			split(name_ip[1], ' ', space_ip);
+			ip_addresses.push_back(space_ip[1]);
+		}
+	}
+
+}
+
+/*
+ *This function will get the ip address of the current machine
+ *returns: ip_addr struct
+ */
+void get_ip(std::vector<std::string>& ip_addresses) {
+	//take address from captured response
+	const char* cmd = "ipconfig";
+	char buffer[128];
+	std::string result = "";
+	std::vector<std::string> lines;
+	FILE* _pipe = _popen(cmd, "r");
+
+	//redirects stdout to pipe and adds elements of buffer to result string
+	if (!_pipe) {
+		std::cout << "ERROR" << std::endl;
+	}
+
+	while (!feof(_pipe)) {
+		if (fgets(buffer, 128, _pipe) != NULL)
+			result += buffer;
+	}
+	_pclose(_pipe);
+
+	split(result, '\n', lines);
+	ipv4_address(lines, ip_addresses);
 }
 
 /*
@@ -171,16 +245,39 @@ int send_packet(pcap_t* fp) {
 	//header checksum
 	packet[24] = 39;
 	packet[25] = 50;
+
+	//getting all ip addresses from ipconfig command
+	std::vector<std::string> ip_addresses;
+	get_ip(ip_addresses);
+	ip_addr* ip_address = (ip_addr*)malloc((sizeof(int) * 4));
+	/////////////not the way to do this//////////////////
+	/*for (int i = 0; i < ip_addresses.size(); i++) {
+		std::vector<std::string> octets;
+		split(ip_addresses[i], '.', octets);
+		ip_address->octet1 = atoi(octets[0].c_str());
+		ip_address->octet2 = atoi(octets[1].c_str());
+		ip_address->octet3 = atoi(octets[2].c_str());
+		ip_address->octet4 = atoi(octets[3].c_str());
+	}*/
+	/////////////////////////////////////////////////////
+	std::vector<std::string> octets;
+	split(ip_addresses[0], '.', octets);
+	ip_address->octet1 = atoi(octets[0].c_str());
+	ip_address->octet2 = atoi(octets[1].c_str());
+	ip_address->octet3 = atoi(octets[2].c_str());
+	ip_address->octet4 = atoi(octets[3].c_str());
+
 	//source ip address
-	packet[26] = 127;
-	packet[27] = 0;
-	packet[28] = 0;
-	packet[29] = 1;
+	packet[26] = ip_address->octet1;
+	packet[27] = ip_address->octet2;
+	packet[28] = ip_address->octet3;
+	packet[29] = ip_address->octet4;
 	//destination ip address
-	packet[30] = 127;
-	packet[31] = 0;
-	packet[32] = 0;
-	packet[33] = 1;
+	packet[30] = ip_address->octet1;
+	packet[31] = ip_address->octet2;
+	packet[32] = ip_address->octet3;
+	packet[33] = ip_address->octet4;
+	free(ip_address);
 
 	//UDP Header
 	//source port
@@ -238,7 +335,7 @@ int send_packet(pcap_t* fp) {
 	packet[68] = 0;
 	//type
 	packet[69] = 0;
-	packet[70] = 1;
+	packet[70] = 60;
 	//class
 	packet[71] = 0; 
 	packet[72] = 1; //internet
@@ -261,7 +358,7 @@ int send_packet(pcap_t* fp) {
 	packet[87] = 0;
 	//type
 	packet[88] = 0;
-	packet[89] = 1;
+	packet[89] = 60;
 	//class
 	packet[90] = 0;
 	packet[91] = 1;//internet
@@ -309,6 +406,7 @@ int main()
 	if (send_packet(adhandle) == -1) {
 		return -1;
 	}
+	
 	int temp = 0;
 	std::cin >> temp;
     return 0;
