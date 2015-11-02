@@ -9,6 +9,9 @@
 #include "pcap.h"
 #include <bitset>
 #include <vector>
+#include <process.h>
+
+#define MAX_THREADS 2
 
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
@@ -52,7 +55,7 @@ int size_of_list(pcap_if_t*  list) {
 *This function returns the device to capture on
 *returns: device if successful otherwise returns NULL
 */
-pcap_t* get_handle() {
+pcap_t* get_handle(pcap_if_t** first_device) {
 	pcap_if_t* all_devices;				//first point of interface list
 	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
 
@@ -78,6 +81,7 @@ pcap_t* get_handle() {
 			pcap_freealldevs(device);
 			return NULL;
 		}
+		(*first_device) = all_devices;
 		return adhandle;
 	}
 
@@ -96,7 +100,7 @@ void get_mac(mac_values** values) {
 	GetAdaptersInfo(info, &size);
 	info = (IP_ADAPTER_INFO *)malloc(size);
 	GetAdaptersInfo(info, &size);
-
+	
 	pos = info;
 	if(pos != NULL) {
 		/////////interate over adapters///////////////
@@ -153,7 +157,6 @@ void split(const std::string& s, char delim, std::vector<std::string>& v) {
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses) {
 	std::size_t found;
 	
-
 	for (int i = 0; i < lines_vect.size(); i++) {
 		found = lines_vect[i].find("IPv4");
 		if (found != std::string::npos) {
@@ -392,10 +395,21 @@ int send_packet(pcap_t* fp) {
 	return 0;
 }
 
+/*
+ *function will contain capture code
+ *return:
+ */
+void capture(void* id) {
+	for (int i = 0; i < 6; i++) {
+		std::cout << i << std::endl;
+	}
+}
+
 int main()
 {
 	//device is pointer to list of devices
-	pcap_t* adhandle = get_handle();
+	/*pcap_if_t* first_device;
+	pcap_t* adhandle = get_handle(&first_device);
 	if (adhandle == NULL)
 		return -1;
 
@@ -406,7 +420,14 @@ int main()
 	if (send_packet(adhandle) == -1) {
 		return -1;
 	}
-	
+	pcap_freealldevs(first_device);*/
+
+	//trying the multithreaded prog
+	int threadNum = 1;
+	_beginthread(capture, 0, &threadNum);
+	//kill thread
+	threadNum--;
+
 	int temp = 0;
 	std::cin >> temp;
     return 0;
