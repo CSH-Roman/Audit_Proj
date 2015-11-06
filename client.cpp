@@ -10,6 +10,7 @@
 #include <bitset>
 #include <vector>
 #include <Windows.h>
+#include <fstream>
 
 #define MAX_THREADS 2
 CRITICAL_SECTION HandleLock;
@@ -42,6 +43,19 @@ typedef struct udp_header {
 	u_short crc;            // Checksum
 }udp_header;
 
+// TCP header used for hand shake
+typedef struct tcp_head{
+	u_short sport;			//source port
+	u_short dport;			//destination port
+	u_int seq_num;			//sequence number
+	u_int ack_num;			//acknowledgement number
+	u_char data_off;		//data offset
+	u_char control_bits;	//control bits
+	u_short window;			//window
+	u_short chk;			//checksum
+	u_short urg_pointer;	//urgent pointer
+}tcp_head;
+
 /*
 *This struct will be used to decode Ethernet headers
 */
@@ -69,6 +83,14 @@ typedef struct ip_addr {
 	int octet4;
 }ip_addr;
 
+//contains the values of the ip address as ints
+typedef struct ip_address {
+	u_char octet1;
+	u_char octet2;
+	u_char octet3;
+	u_char octet4;
+}ip_address;
+
 /*
 *This struct will be used to decapsulate ipv4 headers
 */
@@ -81,8 +103,8 @@ typedef struct IPv4 {
 	u_char  ttl;            // Time to live
 	u_char  proto;          // Protocol
 	u_short crc;            // Header checksum
-	ip_addr saddr;			// Source address
-	ip_addr  daddr;			// Destination address
+	ip_address saddr;			// Source address
+	ip_address  daddr;			// Destination address
 	u_int   op_pad;         // Option + Padding
 }IPv4;
 
@@ -259,7 +281,7 @@ void decapsulate(const u_char *data, int size) {
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
 	u_int head_len;
-	//tcp_head* th;
+	tcp_head* th;
 	udp_header* uh;
 	u_short sport;
 	u_short dport;
@@ -269,64 +291,82 @@ void decapsulate(const u_char *data, int size) {
 	if (ntohs(eth_hdr->type) == 0x800) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
+		
+		int ip_head_len = (int)ih->ver_ihl - 64;
+		
+		if (ip_head_len > 5) {
+			//get ip address as string
+			std::string address = "";
+			char octet[4];
+			_itoa_s((int)ih->saddr.octet1, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.octet2, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.octet3, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.octet4, octet, 10);
+			address = address + octet;
 
-								  // print ip addresses
-		printf("%d.%d.%d.%d -> %d.%d.%d.%d\n",
-			ih->saddr.octet1,
-			ih->saddr.octet2,
-			ih->saddr.octet3,
-			ih->saddr.octet4,
-			ih->daddr.octet1,
-			ih->daddr.octet2,
-			ih->daddr.octet3,
-			ih->daddr.octet4);
+			//get mac address as string
+			std::string mac_address = "";
+			if ((int)ih->proto == 6) {
+				//get tcp header
+				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+				th = (tcp_head *)((u_char*)ih + head_len);
 
-		//get tcp header
-		/*ip_head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-		th = (tcp_head *)((u_char*)ih + ip_head_len);*/
-
-		//get udp header = pointer + length of ipheader
-		head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-		uh = (udp_header *)((u_char*)ih + head_len);
-
-		//convert form network byte order to host byte order
-		sport = ntohs(uh->sport);
-		dport = ntohs(uh->dport);
-
-		std::cout << "source " << sport << "dest " << dport << "length " << head_len << std::endl;
-
-		//dns header = point + udp header
-		head_len = 8; //standard length of udp header is 8 bytes
-		dns_h = (dns_header *)((u_char*)uh + head_len);
-
-		//std::cout << "Identifier " << dns_h->identifier << std::endl;
-		printf("Identifier %2.2x", dns_h->identifier);
-		//determine if the packet is a response or request
-		std::bitset<16> id(dns_h->flags_codes);
-		std::cout << "QR: " << id[7] << std::endl;//bytes swap lsb
-		if (id[7] == 1) {
-			//dns payload= pointer + dns header size
-			head_len = 12;
-			dns_pay = (dns_payload *)((u_char*)dns_h + head_len);
-
-			u_char* domain_char = (u_char*)dns_h + head_len;
-			u_int index = 0;
-			//loop to the end of question field
-			while (*domain_char != 0) {
-				domain_char = (u_char*)dns_h + head_len + index;
-				std::cout << domain_char << std::endl;
-				index++;
+				//check control bit number
+				if ((int)th->control_bits == 2) {
+					//send syn ack
+					//send_packet(address, , "1", true);
+				}
 			}
-			std::cout << index << std::endl;
-			u_char* type = (u_char*)dns_pay + index + 1;//grab least sign bit
-			int lsb = (int)*type;
-			type = type - 1;//grab most sig bit
-			int msb = (int)*type;
-			msb = msb * 256;
-			int type_val = msb + lsb;
-			std::cout << "Type: " << type_val << std::endl;
-			//Use value returned by type for messages
+
+			if ((int)ih->proto == 17) {
+				//get udp header = pointer + length of ipheader
+				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+				uh = (udp_header *)((u_char*)ih + head_len);
+
+				//convert form network byte order to host byte order
+				sport = ntohs(uh->sport);
+				dport = ntohs(uh->dport);
+
+				std::cout << "source " << sport << "dest " << dport << "length " << head_len << std::endl;
+
+				//dns header = point + udp header
+				head_len = 8; //standard length of udp header is 8 bytes
+				dns_h = (dns_header *)((u_char*)uh + head_len);
+
+				//std::cout << "Identifier " << dns_h->identifier << std::endl;
+				printf("Identifier %2.2x", dns_h->identifier);
+				//determine if the packet is a response or request
+				std::bitset<16> id(dns_h->flags_codes);
+				std::cout << "QR: " << id[7] << std::endl;//bytes swap lsb
+				if (id[7] == 1) {
+					//dns payload= pointer + dns header size
+					head_len = 12;
+					dns_pay = (dns_payload *)((u_char*)dns_h + head_len);
+
+					u_char* domain_char = (u_char*)dns_h + head_len;
+					u_int index = 0;
+					//loop to the end of question field
+					while (*domain_char != 0) {
+						domain_char = (u_char*)dns_h + head_len + index;
+						std::cout << domain_char << std::endl;
+						index++;
+					}
+					std::cout << index << std::endl;
+					u_char* type = (u_char*)dns_pay + index + 1;//grab least sign bit
+					int lsb = (int)*type;
+					type = type - 1;//grab most sig bit
+					int msb = (int)*type;
+					msb = msb * 256;
+					int type_val = msb + lsb;
+					std::cout << "Type: " << type_val << std::endl;
+					//Use value returned by type for messages
+				}
+			}
 		}
+			
 	}
 }
 
@@ -334,20 +374,28 @@ void decapsulate(const u_char *data, int size) {
  *Used to send ip packets
  *returns: success of packet being sent
  */
-int send_packet(std::string address, std::string mac_addr) {
+int send_packet(std::string address, std::string mac_addr, std::string option, bool ack) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[34];
+	u_char packet[62];
 
-	////////get gateway ip address///////////
-	//arp -a > "C:\Path to file
+	std::vector<std::string> mac_val;
+	split(mac_addr, ':', mac_val);
+	mac_address->value0 = atoi(mac_val[0].c_str());
+	mac_address->value1 = atoi(mac_val[1].c_str());
+	mac_address->value2 = atoi(mac_val[2].c_str());
+	mac_address->value3 = atoi(mac_val[3].c_str());
+	mac_address->value4 = atoi(mac_val[4].c_str());
+	mac_address->value5 = atoi(mac_val[5].c_str());
+
 	//destination mac address
-	packet[0] = values->value0;
-	packet[1] = values->value1;
-	packet[2] = values->value2;
-	packet[3] = values->value3;
-	packet[4] = values->value4;
-	packet[5] = values->value5;
+	packet[0] = mac_address->value0;
+	packet[1] = mac_address->value1;
+	packet[2] = mac_address->value2;
+	packet[3] = mac_address->value3;
+	packet[4] = mac_address->value4;
+	packet[5] = mac_address->value5;
 	//source mac address
 	packet[6] = values->value0;
 	packet[7] = values->value1;
@@ -361,7 +409,73 @@ int send_packet(std::string address, std::string mac_addr) {
 	packet[12] = 8;
 	packet[13] = 0;
 	//version field and IHL
-	packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+	int size = 0;
+	if (option == "1") {
+		packet[14] = 70;
+		size = 58;
+		//need to set option length
+		for (int i = 34; i < 38; i++) {
+			packet[i] = i % 256;
+		}
+
+		if (ack == true) {
+			//sending ack packet
+			std::ifstream myfile("ack_tcp_header.txt");
+			if (myfile.is_open()) {
+				std::string line;
+				getline(myfile, line);
+				std::vector<std::string> bytes;
+				split(line, ' ', bytes);
+				int index = 0;
+				for (int i = 38; i < 58; i++) {
+					packet[i] = atoi(bytes[index].c_str());
+					index++;
+				}
+				myfile.close();
+			}
+		}
+		else {
+			//sending syn packet
+			std::ifstream myfile("syn_tcp_header.txt");
+			if (myfile.is_open()) {
+				std::string line;
+				getline(myfile, line);
+				std::vector<std::string> bytes;
+				split(line, ' ', bytes);
+				int index = 0;
+				for (int i = 38; i < 58; i++) {
+					packet[i] = atoi(bytes[index].c_str());
+					index++;
+				}
+				myfile.close();
+			}
+		}
+	}
+	else if (option == "2") {
+		packet[14] = 71;
+		size = 62;
+		//need to set option length
+		for (int i = 34; i < 42; i++) {
+			packet[i] = i % 256;
+		}
+		//sending syn packet
+		std::ifstream myfile("syn_tcp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 42; i < 58; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
+	}
+	else
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+	
 	//differentiated services
 	packet[15] = 0;
 	//total length =1500
@@ -377,7 +491,7 @@ int send_packet(std::string address, std::string mac_addr) {
 	//TTL
 	packet[22] = 255;
 	//layer 4 protocol
-	packet[23] = 17;  //must be set to detect layer 4 protocols
+	packet[23] = 6;  //must be set to detect layer 4 protocols
 	//header checksum
 	packet[24] = 39;
 	packet[25] = 50;
@@ -386,16 +500,8 @@ int send_packet(std::string address, std::string mac_addr) {
 	std::vector<std::string> ip_addresses;
 	get_ip(ip_addresses);
 	ip_addr* ip_address = (ip_addr*)malloc((sizeof(int) * 4));
-	/////////////not the way to do this//////////////////
-	/*for (int i = 0; i < ip_addresses.size(); i++) {
-		std::vector<std::string> octets;
-		split(ip_addresses[i], '.', octets);
-		ip_address->octet1 = atoi(octets[0].c_str());
-		ip_address->octet2 = atoi(octets[1].c_str());
-		ip_address->octet3 = atoi(octets[2].c_str());
-		ip_address->octet4 = atoi(octets[3].c_str());
-	}*/
-	/////////////////////////////////////////////////////
+	ip_addr* dest_addr = (ip_addr*)malloc((sizeof(int) * 4));
+	//source address
 	std::vector<std::string> octets;
 	split(ip_addresses[0], '.', octets);
 	ip_address->octet1 = atoi(octets[0].c_str());
@@ -403,25 +509,28 @@ int send_packet(std::string address, std::string mac_addr) {
 	ip_address->octet3 = atoi(octets[2].c_str());
 	ip_address->octet4 = atoi(octets[3].c_str());
 
+	//destination address
+	std::vector<std::string> octs;
+	split(address, '.', octs);
+	dest_addr->octet1 = atoi(octs[0].c_str());
+	dest_addr->octet2 = atoi(octs[1].c_str());
+	dest_addr->octet3 = atoi(octs[2].c_str());
+	dest_addr->octet4 = atoi(octs[3].c_str());
+
 	//source ip address
 	packet[26] = ip_address->octet1;
 	packet[27] = ip_address->octet2;
 	packet[28] = ip_address->octet3;
 	packet[29] = ip_address->octet4;
 	//destination ip address
-	packet[30] = ip_address->octet1;
-	packet[31] = ip_address->octet2;
-	packet[32] = ip_address->octet3;
-	packet[33] = ip_address->octet4;
+	packet[30] = dest_addr->octet1;
+	packet[31] = dest_addr->octet2;
+	packet[32] = dest_addr->octet3;
+	packet[33] = dest_addr->octet4;
 	free(ip_address);
-	
-	/* Fill the rest of the packet 
-	for (int i = 97;i<100;i++)
-	{
-		packet[i] = i % 256;
-	}*/
+		
 
-	/* Send down the packet */
+	/* Send the packet */
 	EnterCriticalSection(&HandleLock);
 	pcap_if_t* first_device;
 	pcap_t* fp = get_handle(&first_device);
@@ -429,7 +538,7 @@ int send_packet(std::string address, std::string mac_addr) {
 		LeaveCriticalSection(&HandleLock);
 		return -1;
 	}
-	if (pcap_sendpacket(fp, packet, 34 /* size */) != 0)
+	if (pcap_sendpacket(fp, packet, size /* size */) != 0)
 	{
 		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
 		LeaveCriticalSection(&HandleLock);
@@ -465,10 +574,10 @@ DWORD WINAPI command_console(PVOID pPARAM) {
 		std::cin >> address;
 		printf("Enter MAC Address:\n");
 		std::cin >> mac_addr;
-		send_packet(address, mac_addr);
+		send_packet(address, mac_addr, option, false);
 	}
 	else 
-		send_packet(address, mac_addr);
+		send_packet(address, mac_addr, option, false);
 
 	return 0;
 }
@@ -529,22 +638,14 @@ DWORD WINAPI capture(PVOID pPARAM) {
 int main()
 {
 	InitializeCriticalSection(&HandleLock);
-	//captures packets using winpcap driver
-	//capture ip traffic
-
-	//send dns packets
-	/*if (send_packet(adhandle) == -1) {
-		return -1;
-	}*/
 	
-
 	//trying the multithreaded prog
 	DWORD id;
-	//HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
-	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
 	
 	//Wait for objects
-	WaitForSingleObject(hSender, INFINITE);
+	//WaitForSingleObject(hSender, INFINITE);
 
 	int temp = 0;
 	std::cin >> temp;
