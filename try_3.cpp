@@ -143,9 +143,10 @@ DWORD WINAPI capture(PVOID pPARAM) {
 		return -1;
 	}
 
+	//ip proto \\udp and port 53 :That will do a lot of filtering but it's not needed right now
 	//compile filter
 	netmask = ((struct sockaddr_in*) (device->addresses->netmask))->sin_addr.S_un.S_addr;
-	if (pcap_compile(adhandle, &opcode, "ip proto \\udp and port 53", 1, netmask) < 0) {
+	if (pcap_compile(adhandle, &opcode, "ip", 1, netmask) < 0) {
 		pcap_freealldevs(device);
 		return -1;
 	}
@@ -197,7 +198,8 @@ int main()
 	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
 
 	//Wait for objects
-	//WaitForSingleObject(hSender, INFINITE);
+	WaitForSingleObject(hCapture, INFINITE);
+	DeleteCriticalSection(&HandleLock);
 
 	int temp = 0;
 	std::cin >> temp;
@@ -467,6 +469,7 @@ void decapsulate(const u_char *data, int size) {
 		ih = (IPv4 *)(data + 14); //length of ethernet header
 		int length = (int)ih->ver_ihl - 64;
 
+		std::cout << length << std::endl;
 		if (length > 5) {
 			//get ip address as string
 			std::string address = "";
@@ -479,6 +482,7 @@ void decapsulate(const u_char *data, int size) {
 			address = address + octet + '.';
 			_itoa_s((int)ih->saddr.byte4, octet, 10);
 			address = address + octet;
+			std::cout << "IP Address " << address << std::endl;
 
 			//get mac address as string
 			std::string mac_address = "";
@@ -759,6 +763,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	packet[32] = dest_addr->byte3;
 	packet[33] = dest_addr->byte4;
 	free(ip_addr);
+	free(dest_addr);
 
 	/* Send the packet */
 	EnterCriticalSection(&HandleLock);

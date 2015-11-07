@@ -212,10 +212,13 @@ int main()
 	//trying the multithreaded prog
 	DWORD id;
 	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
-	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
 	
 	//Wait for objects
-	//WaitForSingleObject(hSender, INFINITE);
+	WaitForSingleObject(hCapture, INFINITE);
+	WaitForSingleObject(hSender, INFINITE);
+	//release resources of critical sections
+	DeleteCriticalSection(&HandleLock);
 
 	int temp = 0;
 	std::cin >> temp;
@@ -318,7 +321,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 			std::vector<std::string> bytes;
 			split(line, ' ', bytes);
 			int index = 0;
-			for (int i = 42; i < 58; i++) {
+			for (int i = 42; i < 62; i++) {
 				packet[i] = atoi(bytes[index].c_str());
 				index++;
 			}
@@ -452,13 +455,14 @@ void decapsulate(const u_char *data, int size) {
 			mac_address = mac_address + byte + ':';
 			_itoa_s((int)eth_hdr->src[5], byte, 10);
 			mac_address = mac_address + byte;
+
 			if ((int)ih->proto == 6) {
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
 
 				//check control bit number
-				if ((int)th->control_bits == 2) {
+				if ((int)th->control_bits == 16) {
 					//send syn ack
 					send_packet(address, mac_address, "1", true);
 				}
