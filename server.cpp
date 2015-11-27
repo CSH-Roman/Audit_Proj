@@ -89,7 +89,7 @@ typedef struct ip_address {
 	u_char octet2;
 	u_char octet3;
 	u_char octet4;
-}ip_address;
+}ip_address_strc;
 
 /*
 *This struct will be used to decapsulate ipv4 headers
@@ -103,26 +103,79 @@ typedef struct IPv4 {
 	u_char  ttl;            // Time to live
 	u_char  proto;          // Protocol
 	u_short crc;            // Header checksum
-	ip_address saddr;			// Source address
-	ip_address  daddr;			// Destination address
+	ip_address_strc saddr;			// Source address
+	ip_address_strc daddr;			// Destination address
 	u_int   op_pad;         // Option + Padding
 }IPv4;
 
 //function prototypes
 int send_packet(std::string address, std::string mac_addr, std::string option, bool ack);
-void decapsulate(const u_char *data, int size);
+int decapsulate(const u_char *data, int size);
 void get_ip(std::vector<std::string>& ip_addresses);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
 void split(const std::string& s, char delim, std::vector<std::string>& v);
 void get_mac(mac_values** values);
 pcap_t* get_handle(pcap_if_t** first_device);
 int size_of_list(pcap_if_t*  list);
+int mode_manager(std::string option, std::string address, std::string mac_addr);
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command);
+DWORD WINAPI command_console(PVOID pPARAM);
+DWORD WINAPI capture(PVOID pPARAM);
 
+int main()
+{
+	//send_packet("127.0.0.1", "40:25:c2:c0:15:51", "1", false);
+	
+	InitializeCriticalSection(&HandleLock);
+
+	//trying the multithreaded prog
+	DWORD id;
+	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
+	
+	//Wait for objects
+	WaitForSingleObject(hCapture, INFINITE);
+	//WaitForSingleObject(hSender, INFINITE);
+	//release resources of critical sections
+	DeleteCriticalSection(&HandleLock);
+	
+	int temp = 0;
+	std::cin >> temp;
+    return 0;
+}
 
 /*
- *This is the server interface for send packets
- *returns: success of operation
+ *This function will handle what modes options are run in.
+ *It will also handle user interaction with the interface.
+ *Parameters: option (str), dst IP address (str), src IP address (str)
+ *Return: 0 success, 1 Failure
  */
+int mode_manager(std::string option, std::string address, std::string mac_addr) {
+	//enter connected mode to send and receive packets
+	if (option == "1") {
+		std::string command = "";
+		std::cout << "1)Enter command" << std::endl;
+		std::cin >> command;
+		//send packet
+		send_packet(address, mac_addr, option, false);
+		//check for response
+		//enter command mode
+		connected_mode_send(address, mac_addr, option, command);
+	}
+	//enter connection-less mode
+	else if(option == "2"){
+		//send packet with specific header length
+	}
+	else
+		return 1; //error
+
+	return 0; //success
+}
+
+/*
+*This is the server interface for send packets
+*returns: success of operation
+*/
 DWORD WINAPI command_console(PVOID pPARAM) {
 	//Variables
 	std::string option = "";
@@ -144,19 +197,19 @@ DWORD WINAPI command_console(PVOID pPARAM) {
 		std::cin >> address;
 		printf("Enter MAC Address:\n");
 		std::cin >> mac_addr;
-		send_packet(address, mac_addr, option, false);
+		mode_manager(option, address, mac_addr);
 	}
-	else 
-		send_packet(address, mac_addr, option, false);
+	else
+		mode_manager(option, address, mac_addr);
 
 	return 0;
 }
 
 /*
- *function will take an object containing a interface handle
- *which will be used to open a capturing session on that int
- *returns: unsigned int to help show how the thread completed execution
- */
+*function will take an object containing a interface handle
+*which will be used to open a capturing session on that int
+*returns: unsigned int to help show how the thread completed execution
+*/
 DWORD WINAPI capture(PVOID pPARAM) {
 	//add any code that does not require critical sect
 
@@ -172,7 +225,7 @@ DWORD WINAPI capture(PVOID pPARAM) {
 	struct bpf_program opcode;			//this will contain useful shit
 	u_int netmask;						//this will contain the netmask of the interface capturing
 	netmask = ((struct sockaddr_in*) (first_device->addresses->netmask))->sin_addr.S_un.S_addr;
-	if (pcap_compile(adhandle, &opcode, "ip proto \\udp and port 53", 1, netmask) < 0) {
+	if (pcap_compile(adhandle, &opcode, "ip", 1, netmask) < 0) {
 		pcap_freealldevs(first_device);
 		LeaveCriticalSection(&HandleLock);
 		return -1;
@@ -192,7 +245,7 @@ DWORD WINAPI capture(PVOID pPARAM) {
 	//capture packets on dev
 	struct pcap_pkthdr *pktHeader;		//stores packet header information
 	const u_char *pkt_data;				//stores packet data
-	/////////infinite loop need to change///////////
+										/////////infinite loop need to change///////////
 	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
 
 		//inspect packet
@@ -205,24 +258,161 @@ DWORD WINAPI capture(PVOID pPARAM) {
 	return 0;   // thread completed successfully
 }
 
-int main()
-{
-	InitializeCriticalSection(&HandleLock);
+/*
+*Used to send ip packets
+*returns: success of packet being sent
+*/
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command) {
+	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
+	get_mac(&values);
+	u_char packet[162];
 	
-	//trying the multithreaded prog
-	DWORD id;
-	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
-	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
-	
-	//Wait for objects
-	WaitForSingleObject(hCapture, INFINITE);
-	WaitForSingleObject(hSender, INFINITE);
-	//release resources of critical sections
-	DeleteCriticalSection(&HandleLock);
+	std::vector<std::string> mac_val;
+	split(mac_addr, ':', mac_val);
+	mac_address->value0 = atoi(mac_val[0].c_str());
+	mac_address->value1 = atoi(mac_val[1].c_str());
+	mac_address->value2 = atoi(mac_val[2].c_str());
+	mac_address->value3 = atoi(mac_val[3].c_str());
+	mac_address->value4 = atoi(mac_val[4].c_str());
+	mac_address->value5 = atoi(mac_val[5].c_str());
 
-	int temp = 0;
-	std::cin >> temp;
-    return 0;
+	//destination mac address
+	packet[0] = mac_address->value0;
+	packet[1] = mac_address->value1;
+	packet[2] = mac_address->value2;
+	packet[3] = mac_address->value3;
+	packet[4] = mac_address->value4;
+	packet[5] = mac_address->value5;
+	free(mac_address);
+	//source mac address
+	packet[6] = values->value0;
+	packet[7] = values->value1;
+	packet[8] = values->value2;
+	packet[9] = values->value3;
+	packet[10] = values->value4;
+	packet[11] = values->value5;
+	free(values);
+
+	//ethernet type IPv4
+	packet[12] = 8;
+	packet[13] = 0;
+	//version field and IHL
+	int size = 0;
+	if (option == "1") {
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+		//get packet size
+		int com_len = command.length();
+		size = 60; //needs this for sending packet function
+		
+		std::cout << "I've sent the packet boss." << std::endl;
+		//sending ack packet
+		std::ifstream myfile("psh_ack_tcp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 34; i < 54; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
+
+		//set ssl header
+		packet[55] = 23;  //packet type
+		//version 1.1
+		packet[56] = 1;   //major 1
+		packet[57] = 2;   //minor 1
+		//length
+		packet[58] = 0;   //high
+		packet[59] = 2;   //low
+		//data
+		int index = 60; //start index
+		for (int x = 0; x < command.length(); x++) {
+			packet[index] = command[x];
+		}
+		
+	}
+	else if (option == "2") {
+		//this will represent something else
+	}
+	else
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+
+						 //differentiated services
+	packet[15] = 0;
+	//total length =1500
+	packet[16] = 5;
+	packet[17] = 220;
+	//identification =19142
+	packet[18] = 74;
+	packet[19] = 198;
+	//flags don't fragment =010
+	packet[20] = 64;
+	//fragment offset
+	packet[21] = 0;
+	//TTL
+	packet[22] = 255;
+	//layer 4 protocol
+	packet[23] = 6;  //must be set to detect layer 4 protocols
+					 //header checksum
+	packet[24] = 39;
+	packet[25] = 50;
+
+	//getting all ip addresses from ipconfig command
+	std::vector<std::string> ip_addresses;
+	get_ip(ip_addresses);
+	ip_addr* ip_address = (ip_addr*)malloc((sizeof(int) * 4));
+	ip_addr* dest_addr = (ip_addr*)malloc((sizeof(int) * 4));
+	//source address
+	std::vector<std::string> octets;
+	split(ip_addresses[0], '.', octets);
+	ip_address->octet1 = atoi(octets[0].c_str());
+	ip_address->octet2 = atoi(octets[1].c_str());
+	ip_address->octet3 = atoi(octets[2].c_str());
+	ip_address->octet4 = atoi(octets[3].c_str());
+
+	//destination address
+	std::vector<std::string> octs;
+	split(address, '.', octs);
+	dest_addr->octet1 = atoi(octs[0].c_str());
+	dest_addr->octet2 = atoi(octs[1].c_str());
+	dest_addr->octet3 = atoi(octs[2].c_str());
+	dest_addr->octet4 = atoi(octs[3].c_str());
+
+	//source ip address
+	packet[26] = ip_address->octet1;
+	packet[27] = ip_address->octet2;
+	packet[28] = ip_address->octet3;
+	packet[29] = ip_address->octet4;
+	//destination ip address
+	packet[30] = dest_addr->octet1;
+	packet[31] = dest_addr->octet2;
+	packet[32] = dest_addr->octet3;
+	packet[33] = dest_addr->octet4;
+	free(ip_address);
+
+	std::cout << "made it here" << std::endl;
+	/* Send the packet */
+	EnterCriticalSection(&HandleLock);
+	pcap_if_t* first_device;
+	pcap_t* fp = get_handle(&first_device);
+	if (fp == NULL) {
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	if (pcap_sendpacket(fp, packet, size /* size */) != 0)
+	{
+		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	LeaveCriticalSection(&HandleLock);
+
+	return 0;
 }
 
 /*
@@ -251,6 +441,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	packet[3] = mac_address->value3;
 	packet[4] = mac_address->value4;
 	packet[5] = mac_address->value5;
+	free(mac_address);
 	//source mac address
 	packet[6] = values->value0;
 	packet[7] = values->value1;
@@ -274,6 +465,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 		}
 
 		if (ack == true) {
+			std::cout << "I've sent the packet boss." << std::endl;
 			//sending ack packet
 			std::ifstream myfile("ack_tcp_header.txt");
 			if (myfile.is_open()) {
@@ -409,7 +601,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 *and call functions if needed
 *renturns nothing
 */
-void decapsulate(const u_char *data, int size) {
+int decapsulate(const u_char *data, int size) {
 	eth_header* eth_hdr;
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
@@ -427,6 +619,7 @@ void decapsulate(const u_char *data, int size) {
 
 		int ip_head_len = (int)ih->ver_ihl - 64;
 
+		//looks for packets that have options
 		if (ip_head_len > 5) {
 			//get ip address as string
 			std::string address = "";
@@ -457,14 +650,16 @@ void decapsulate(const u_char *data, int size) {
 			mac_address = mac_address + byte;
 
 			if ((int)ih->proto == 6) {
+				std::cout << "Capturing TCP" << std::endl;
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
 
 				//check control bit number
-				if ((int)th->control_bits == 16) {
+				if ((int)th->control_bits == 18) {
 					//send syn ack
 					send_packet(address, mac_address, "1", true);
+					return 1;
 				}
 			}
 
@@ -509,11 +704,13 @@ void decapsulate(const u_char *data, int size) {
 					int type_val = msb + lsb;
 					std::cout << "Type: " << type_val << std::endl;
 					//Use value returned by type for messages
+					return 2;
 				}
 			}
 		}
 
 	}
+	return 0;
 }
 
 /*
