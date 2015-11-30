@@ -303,7 +303,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 		//get packet size
 		int com_len = command.length();
-		size = 60; //needs this for sending packet function
+		size = 66 + command.length(); //needs this for sending packet function
 		
 		std::cout << "I've sent the packet boss." << std::endl;
 		//sending ack packet
@@ -314,25 +314,37 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 			std::vector<std::string> bytes;
 			split(line, ' ', bytes);
 			int index = 0;
-			for (int i = 34; i < 54; i++) {
+			for (int i = 34; i < 53; i++) {
 				packet[i] = atoi(bytes[index].c_str());
 				index++;
 			}
 			myfile.close();
 		}
+		//last byte in urgent pointer
+		packet[53] = 0;
 
 		//set ssl header
-		packet[55] = 23;  //packet type
-		//version 1.1
-		packet[56] = 1;   //major 1
-		packet[57] = 2;   //minor 1
+		packet[54] = 23;  //packet type
+		//version 1.2 => 03 03 is how to set this field
+		//I Know, I Know, it's dumb.
+		packet[55] = 3;   //major 1
+		packet[56] = 3;   //minor 1
 		//length
-		packet[58] = 0;   //high
-		packet[59] = 2;   //low
+		packet[57] = 0;   //high
+		packet[58] = 7 + command.length();   //low
+		//zero padding
+		packet[59] = 0;
+		packet[60] = 0;
+		packet[61] = 0;
+		packet[62] = 0;
+		packet[63] = 0;
+		packet[64] = 0;
+		packet[65] = 0;
 		//data
-		int index = 60; //start index
+		int index = 66; //start index
 		for (int x = 0; x < command.length(); x++) {
 			packet[index] = command[x];
+			index++;
 		}
 		
 	}
