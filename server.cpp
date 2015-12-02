@@ -183,7 +183,7 @@ DWORD WINAPI command_console(PVOID pPARAM) {
 	std::string mac_addr = "";
 
 	//create interface
-	printf("Bot Options:\n1:Get Data\n2:Enter Commands\n");
+	printf("Bot Options:\n1:Enter Commands\n2:Scan\n");
 	std::cin >> option;
 	printf("Enter IP Address or 1 to List Bots:\n");
 	std::cin >> address;
@@ -468,7 +468,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	packet[13] = 0;
 	//version field and IHL
 	int size = 0;
-	if (option == "1") {
+	if (option == "2") {
 		packet[14] = 70;
 		size = 58;
 		//need to set option length
@@ -510,7 +510,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 			}
 		}
 	}
-	else if (option == "2") {
+	else if (option == "1") {
 		packet[14] = 71;
 		size = 62;
 		//need to set option length
@@ -669,8 +669,8 @@ int decapsulate(const u_char *data, int size) {
 
 				//check control bit number
 				if ((int)th->control_bits == 18) {
-					//send syn ack
-					send_packet(address, mac_address, "1", true);
+					//received syn-ack now send ack
+					send_packet(address, mac_address, "2", true);
 					return 1;
 				}
 			}
