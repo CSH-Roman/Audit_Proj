@@ -109,7 +109,7 @@ typedef struct IPv4 {
 }IPv4;
 
 //function prototypes
-int send_packet(std::string address, std::string mac_addr, std::string option, bool ack);
+int send_packet(std::string address, std::string mac_addr, std::string option, bool ack, int id_num);
 int decapsulate(const u_char *data, int size);
 void get_ip(std::vector<std::string>& ip_addresses);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
@@ -118,9 +118,9 @@ void get_mac(mac_values** values);
 pcap_t* get_handle(pcap_if_t** first_device);
 int size_of_list(pcap_if_t*  list);
 int mode_manager(std::string option, std::string address, std::string mac_addr);
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command);
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_number);
 DWORD WINAPI command_console(PVOID pPARAM);
-DWORD WINAPI capture(PVOID pPARAM);
+int capture();
 
 int main()
 {
@@ -130,11 +130,11 @@ int main()
 
 	//trying the multithreaded prog
 	DWORD id;
-	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
+	//HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
 	HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
 	
 	//Wait for objects
-	WaitForSingleObject(hCapture, INFINITE);
+	//WaitForSingleObject(hCapture, INFINITE);
 	//WaitForSingleObject(hSender, INFINITE);
 	//release resources of critical sections
 	DeleteCriticalSection(&HandleLock);
@@ -151,6 +151,9 @@ int main()
  *Return: 0 success, 1 Failure
  */
 int mode_manager(std::string option, std::string address, std::string mac_addr) {
+	int identification_number = 0;
+	identification_number = rand() % 250;
+
 	//check to see if the packets are getting sent to all addresses
 	if (address == "y") {
 		//open file
@@ -170,10 +173,12 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 					std::cout << "1)Enter command" << std::endl;
 					std::cin >> command;
 					//send packet
-					send_packet(address, mac_addr, option, false);
+					send_packet(address, mac_addr, option, false, identification_number);
 					//check for response
+					capture();
 					//enter command mode
-					connected_mode_send(address, mac_addr, option, command);
+					identification_number = identification_number + 3;
+					connected_mode_send(address, mac_addr, option, command, identification_number);
 				}
 				//enter connection-less mode
 				else if (option == "2") {
@@ -194,14 +199,21 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 			std::cout << "1)Enter command" << std::endl;
 			std::cin >> command;
 			//send packet
-			send_packet(address, mac_addr, option, false);
+			send_packet(address, mac_addr, option, false, identification_number);
 			//check for response
+			capture();
 			//enter command mode
-			connected_mode_send(address, mac_addr, option, command);
+			identification_number = identification_number + 3;
+			connected_mode_send(address, mac_addr, option, command, identification_number);
 		}
 		//enter connection-less mode
 		else if (option == "2") {
 			//send packet with specific header length
+			std::string command = "";
+			std::cout << "1)Enter command" << std::endl;
+			std::cin >> command;
+			//send packet
+			send_packet(address, mac_addr, option, false, identification_number);
 		}
 		else
 			return 1; //error
@@ -258,7 +270,7 @@ DWORD WINAPI command_console(PVOID pPARAM) {
 *which will be used to open a capturing session on that int
 *returns: unsigned int to help show how the thread completed execution
 */
-DWORD WINAPI capture(PVOID pPARAM) {
+int capture() {
 	//add any code that does not require critical sect
 
 	/////////////beginning of critical section/////////////
@@ -294,11 +306,14 @@ DWORD WINAPI capture(PVOID pPARAM) {
 	struct pcap_pkthdr *pktHeader;		//stores packet header information
 	const u_char *pkt_data;				//stores packet data
 										/////////infinite loop need to change///////////
-	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
-
-		//inspect packet
-		if (pktHeader->len > 0) {
-			decapsulate(pkt_data, pktHeader->caplen);
+	//while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
+	int return_val = -1;
+	while (return_val < 1){
+		if (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
+			//inspect packet
+			if (pktHeader->len > 0) {
+				return_val = decapsulate(pkt_data, pktHeader->caplen);
+			}
 		}
 	}
 	///////////////////////////////////////////////
@@ -310,7 +325,7 @@ DWORD WINAPI capture(PVOID pPARAM) {
 *Used to send ip packets
 *returns: success of packet being sent
 */
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command) {
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
@@ -409,7 +424,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	packet[17] = 220;
 	//identification =19142
 	packet[18] = 74;
-	packet[19] = 198;
+	packet[19] = id_num;
 	//flags don't fragment =010
 	packet[20] = 64;
 	//fragment offset
@@ -479,7 +494,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 *Used to send ip packets
 *returns: success of packet being sent
 */
-int send_packet(std::string address, std::string mac_addr, std::string option, bool ack) {
+int send_packet(std::string address, std::string mac_addr, std::string option, bool ack, int id_num) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
@@ -516,7 +531,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	packet[13] = 0;
 	//version field and IHL
 	int size = 0;
-	if (option == "2") {
+	if (option == "10") {
 		packet[14] = 70;
 		size = 58;
 		//need to set option length
@@ -580,6 +595,28 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 			myfile.close();
 		}
 	}
+	else if (option == "2") {
+		packet[14] = 72;
+		size = 66;
+		//need to set option length
+		for (int i = 34; i < 46; i++) {
+			packet[i] = i % 256;
+		}
+		//sending udp packet
+		std::ifstream myfile("udp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 46; i < 53; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
+	}
 	else
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 
@@ -590,16 +627,21 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	packet[17] = 220;
 	//identification =19142
 	packet[18] = 74;
-	packet[19] = 198;
+	packet[19] = id_num;
 	//flags don't fragment =010
 	packet[20] = 64;
 	//fragment offset
 	packet[21] = 0;
 	//TTL
 	packet[22] = 255;
-	//layer 4 protocol
-	packet[23] = 6;  //must be set to detect layer 4 protocols
-					 //header checksum
+	if (option == "3") {
+		packet[23] = 17; //udp layer 4 protocol
+	}
+	else {
+		//layer 4 protocol
+		packet[23] = 6;  //must be set to detect layer 4 protocols
+	}
+	//header checksum
 	packet[24] = 39;
 	packet[25] = 50;
 
@@ -711,6 +753,9 @@ int decapsulate(const u_char *data, int size) {
 
 			if ((int)ih->proto == 6) {
 				std::cout << "Capturing TCP" << std::endl;
+				//identification number
+				int id_num = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
+				id_num = id_num % 256;
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
@@ -718,7 +763,8 @@ int decapsulate(const u_char *data, int size) {
 				//check control bit number
 				if ((int)th->control_bits == 18) {
 					//received syn-ack now send ack
-					send_packet(address, mac_address, "2", true);
+					id_num++;
+					send_packet(address, mac_address, "10", true, id_num);
 					return 1;
 				}
 			}
