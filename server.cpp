@@ -135,7 +135,7 @@ int main()
 	
 	//Wait for objects
 	//WaitForSingleObject(hCapture, INFINITE);
-	//WaitForSingleObject(hSender, INFINITE);
+	WaitForSingleObject(hSender, INFINITE);
 	//release resources of critical sections
 	DeleteCriticalSection(&HandleLock);
 	
@@ -534,6 +534,9 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	if (option == "10") {
 		packet[14] = 70;
 		size = 58;
+		//total length of ip header + tcp header
+		packet[16] = 0;
+		packet[17] = size - 14;
 		//need to set option length
 		for (int i = 34; i < 38; i++) {
 			packet[i] = i % 256;
@@ -576,6 +579,9 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	else if (option == "1") {
 		packet[14] = 71;
 		size = 62;
+		//total length of ip header + tcp header
+		packet[16] = 0;
+		packet[17] = size - 14;
 		//need to set option length
 		for (int i = 34; i < 42; i++) {
 			packet[i] = i % 256;
@@ -598,6 +604,9 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	else if (option == "2") {
 		packet[14] = 72;
 		size = 66;
+		//total length of ip header + tcp header
+		packet[16] = 0;
+		packet[17] = size - 14;
 		//need to set option length
 		for (int i = 34; i < 46; i++) {
 			packet[i] = i % 256;
@@ -622,9 +631,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 
 						 //differentiated services
 	packet[15] = 0;
-	//total length =1500
-	packet[16] = 5;
-	packet[17] = 220;
+	// packet 16 and 17 are set in the conditionals above
 	//identification =19142
 	packet[18] = 74;
 	packet[19] = id_num;

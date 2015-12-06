@@ -422,7 +422,9 @@ int size_of_list(pcap_if_t*  list) {
 }
 
 /*
-*This function returns the device to capture on
+*This function returns the device to capture on used to send packet
+*the difference between this function and
+*capture_em_packets is return type
 *returns: device if successful otherwise returns NULL
 */
 pcap_t* get_handle(pcap_if_t** first_device) {
@@ -443,6 +445,7 @@ pcap_t* get_handle(pcap_if_t** first_device) {
 	//select interface
 	//In this case inteface selected is the second interface
 	pcap_if_t* device = all_devices;
+	std::cout << "Interface Selected: " << device->description << std::endl;
 	if (device != NULL) {
 		char error_msg[PCAP_ERRBUF_SIZE];	//error message buffer
 		pcap_t* adhandle;					//stores the handle created by pcap_open for pcap_next_ex to read packets
@@ -470,7 +473,7 @@ void decapsulate(const u_char *data, int size) {
 	u_int head_len;
 	tcp_head* th;
 	tls_header* tls_head;
-	//udp_header* uh;
+	udp_header* uh;
 	//u_short sport;
 	//u_short dport;
 
@@ -479,7 +482,6 @@ void decapsulate(const u_char *data, int size) {
 		ih = (IPv4 *)(data + 14); //length of ethernet header
 		int ip_header_length = (int)ih->ver_ihl - 64;
 		
-		std::cout << ip_header_length << std::endl;
 		//check tcp protocol
 		if ((int)ih->proto == 6) {
 			//get ip address as string
@@ -493,7 +495,6 @@ void decapsulate(const u_char *data, int size) {
 			address = address + octet + '.';
 			_itoa_s((int)ih->saddr.byte4, octet, 10);
 			address = address + octet;
-			std::cout << "IP Address " << address << std::endl;
 
 			//get mac address as string
 			std::string mac_address = "";
@@ -516,6 +517,9 @@ void decapsulate(const u_char *data, int size) {
 			total_packet_length = total_packet_length - 20 - (ip_header_length * 4);
 			//assume there is layer three data
 			if(total_packet_length > 0){
+				std::cout << total_packet_length << std::endl;
+				std::cout << ip_header_length << std::endl;
+				std::cout << "IP Address " << address << std::endl;
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
@@ -547,6 +551,8 @@ void decapsulate(const u_char *data, int size) {
 				//length 6 is reserved for ack packets
 				//on botnet communication to complete handshake
 				if (ip_header_length > 6) {
+					std::cout << ip_header_length << std::endl;
+					std::cout << "IP Address " << address << std::endl;
 					//get tcp header
 					head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 					th = (tcp_head *)((u_char*)ih + head_len);
@@ -560,10 +566,45 @@ void decapsulate(const u_char *data, int size) {
 				}
 			}
 		}
+		else if ((int)ih->proto == 17) {
+			//get ip address as string
+			std::string address = "";
+			char octet[4];
+			_itoa_s((int)ih->saddr.byte1, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte2, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte3, octet, 10);
+			address = address + octet + '.';
+			_itoa_s((int)ih->saddr.byte4, octet, 10);
+			address = address + octet;
+			std::cout << "IP Address " << address << std::endl;
 
-		//get udp header = pointer + length of ipheader
-		/*head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-		uh = (udp_header *)((u_char*)ih + head_len);*/
+			//get mac address as string
+			std::string mac_address = "";
+			char byte[4];
+			_itoa_s((int)eth_hdr->src[0], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[1], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[2], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[3], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[4], byte, 10);
+			mac_address = mac_address + byte + ':';
+			_itoa_s((int)eth_hdr->src[5], byte, 10);
+			mac_address = mac_address + byte;
+
+			if (ip_header_length == 8) {
+				//get udp header = pointer + length of ipheader
+				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+				uh = (udp_header *)((u_char*)ih + head_len);
+
+				//scan network code here
+
+			}
+		}		
 
 	}
 }
@@ -590,6 +631,7 @@ pcap_if_t* capture_em_packets() {
 	//select interface
 	//In this case inteface selected is the second interface
 	pcap_if_t* device = all_devices;
+	std::cout << "Interface Selected: " << device->description << std::endl;
 	if (device != NULL)
 		return device;
 
@@ -817,6 +859,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	pcap_if_t* first_device;
 	pcap_t* fp = get_handle(&first_device);
 	if (fp == NULL) {
+		std::cout << "Did not get interface handle" << std::endl;
 		LeaveCriticalSection(&HandleLock);
 		return -1;
 	}
