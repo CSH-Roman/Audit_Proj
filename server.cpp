@@ -152,7 +152,7 @@ int main()
  */
 int mode_manager(std::string option, std::string address, std::string mac_addr) {
 	int identification_number = 0;
-	identification_number = rand() % 250;
+	identification_number = rand() % 6500;
 
 	//check to see if the packets are getting sent to all addresses
 	if (address == "y") {
@@ -178,7 +178,15 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 					capture();
 					//enter command mode
 					identification_number = identification_number + 3;
-					connected_mode_send(address, mac_addr, option, command, identification_number);
+					while (command != "exit") {
+						for (int i = 0; i < command.length(); i++) {
+							command[i] = command[i] ^ 'H';
+						}
+						connected_mode_send(address, mac_addr, option, command, identification_number);
+						identification_number++;
+						std::cout << "1)Enter command" << std::endl;
+						std::cin >> command;
+					}
 				}
 				//enter connection-less mode
 				else if (option == "2") {
@@ -204,7 +212,15 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 			capture();
 			//enter command mode
 			identification_number = identification_number + 3;
-			connected_mode_send(address, mac_addr, option, command, identification_number);
+			while (command != "exit") {
+				for (int i = 0; i < command.length(); i++) {
+					command[i] = command[i] ^ 'H';
+				}
+				connected_mode_send(address, mac_addr, option, command, identification_number);
+				identification_number++;
+				std::cout << "1)Enter command" << std::endl;
+				std::cin >> command;
+			}
 		}
 		//enter connection-less mode
 		else if (option == "2") {
@@ -422,9 +438,9 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	//total length =1500
 	packet[16] = 5;
 	packet[17] = 220;
-	//identification =19142
-	packet[18] = 74;
-	packet[19] = id_num;
+	//identification
+	packet[18] = id_num / 256;
+	packet[19] = id_num % 256;
 	//flags don't fragment =010
 	packet[20] = 64;
 	//fragment offset
@@ -629,12 +645,12 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 	else
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 
-						 //differentiated services
+	//differentiated services
 	packet[15] = 0;
 	// packet 16 and 17 are set in the conditionals above
-	//identification =19142
-	packet[18] = 74;
-	packet[19] = id_num;
+	//identification number
+	packet[18] = id_num / 256;
+	packet[19] = id_num % 256;
 	//flags don't fragment =010
 	packet[20] = 64;
 	//fragment offset
@@ -762,7 +778,7 @@ int decapsulate(const u_char *data, int size) {
 				std::cout << "Capturing TCP" << std::endl;
 				//identification number
 				int id_num = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
-				id_num = id_num % 256;
+				
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
@@ -770,7 +786,7 @@ int decapsulate(const u_char *data, int size) {
 				//check control bit number
 				if ((int)th->control_bits == 18) {
 					//received syn-ack now send ack
-					id_num++;
+					id_num++;  //add one to identification number
 					send_packet(address, mac_address, "10", true, id_num);
 					return 1;
 				}

