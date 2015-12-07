@@ -18,6 +18,13 @@ CRITICAL_SECTION HandleLock;
 #pragma comment(lib, "ws2_32.lib") //WinSock lib
 #pragma comment(lib, "IPHLPAPI.lib") //IP Helper lib
 
+//contains the TLS packet header
+typedef struct tls_header {
+	u_char type;		// Contains the type of packet
+	u_short version;	// This is not useful right meow
+	u_short length;		// Length of data
+}tls_header;
+
 //contains the dns packet data
 typedef struct dns_payload {
 	u_char size;
@@ -737,15 +744,16 @@ int decapsulate(const u_char *data, int size) {
 	u_short dport;
 	dns_header* dns_h;
 	dns_payload* dns_pay;
+	tls_header* tls_head;
 
 	if (ntohs(eth_hdr->type) == 0x800) {
 		// retireve the position of the ip header
 		ih = (IPv4 *)(data + 14); //length of ethernet header
 
 		int ip_head_len = (int)ih->ver_ihl - 64;
-
+		
 		//looks for packets that have options
-		if (ip_head_len > 5) {
+		if ((int)ih->proto == 6) {
 			//get ip address as string
 			std::string address = "";
 			char octet[4];
@@ -774,7 +782,11 @@ int decapsulate(const u_char *data, int size) {
 			_itoa_s((int)eth_hdr->src[5], byte, 10);
 			mac_address = mac_address + byte;
 
-			if ((int)ih->proto == 6) {
+			//check total packet length
+			int total_packet_length = ((ih->tlen & 0xFF) << 8) | ((ih->tlen >> 8) & 0xFF); //length of data
+			total_packet_length = total_packet_length - 20 - (ip_head_len * 4);
+
+			if (ip_head_len > 5) {
 				std::cout << "Capturing TCP" << std::endl;
 				//identification number
 				int id_num = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
@@ -791,8 +803,46 @@ int decapsulate(const u_char *data, int size) {
 					return 1;
 				}
 			}
+			else if (total_packet_length > 0) {
+				int identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
 
-			if ((int)ih->proto == 17) {
+				//get tcp header
+				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+				th = (tcp_head *)((u_char*)ih + head_len);
+
+				std::cout << "Flags: " << (int)th->control_bits << std::endl;
+				//check control bit number for ack-psh packet
+				if ((int)th->control_bits == 24) {
+					//decapsulate TLS header
+					tls_head = (tls_header *)((u_char*)th + 20);
+
+					//have to flip bits because of memory type
+					if (tls_head->type == 23) {
+						int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
+						std::string command; //string that will contain command used
+						for (int i = 0; i < tls_data_len; i++) {
+							//get data
+							command = command + (char)*data_char;
+							//increment
+							data_char = data_char + 1;
+						}
+						//decrypt command
+						for (int i = 0; i < command.length(); i++) {
+							command[i] = command[i] ^ 'H';
+						}
+						std::cout << command << std::endl;
+						return 1;
+					}
+				}
+			}
+			else{
+				return 0;
+			}
+			
+		}
+		if ((int)ih->proto == 17) {
+			if (ip_head_len > 5) {
 				//get udp header = pointer + length of ipheader
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				uh = (udp_header *)((u_char*)ih + head_len);
@@ -837,7 +887,6 @@ int decapsulate(const u_char *data, int size) {
 				}
 			}
 		}
-
 	}
 	return 0;
 }
