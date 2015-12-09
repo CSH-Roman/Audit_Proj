@@ -117,7 +117,7 @@ typedef struct IPv4 {
 
 //function prototypes
 int send_packet(std::string address, std::string mac_addr, std::string option, bool ack, int id_num);
-int decapsulate(const u_char *data, int size);
+int decapsulate(const u_char *data, int size, int* layer_five_len);
 void get_ip(std::vector<std::string>& ip_addresses);
 void ipv4_address(std::vector<std::string>& lines_vect, std::vector<std::string>& ip_addresses);
 void split(const std::string& s, char delim, std::vector<std::string>& v);
@@ -125,7 +125,7 @@ void get_mac(mac_values** values);
 pcap_t* get_handle(pcap_if_t** first_device);
 int size_of_list(pcap_if_t*  list);
 int mode_manager(std::string option, std::string address, std::string mac_addr);
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_number);
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_number, int seq_num, int ack_num);
 DWORD WINAPI command_console(PVOID pPARAM);
 int capture();
 int command_check(std::string command);
@@ -180,21 +180,23 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 					std::string command = "";
 					std::cout << "1)Enter command" << std::endl;
 					std::cin >> command;
-					//send packet
+					//send syn packet to start hand shake
 					send_packet(address, mac_addr, option, false, identification_number);
 					//check for response
-					capture();
+					int ack_num = capture();
 					//enter command mode
+					int seq_num = command.length() + 13;
 					identification_number = identification_number + 3;
 					while (command != "exit") {
 						for (int i = 0; i < command.length(); i++) {
 							command[i] = command[i] ^ 'H';
 						}
-						connected_mode_send(address, mac_addr, option, command, identification_number);
+						connected_mode_send(address, mac_addr, option, command, identification_number, seq_num, ack_num);
 						capture();
 						identification_number++;
 						std::cout << "1)Enter command" << std::endl;
 						std::cin >> command;
+						seq_num = command.length() + 13 + seq_num;
 					}
 				}
 				//enter connection-less mode
@@ -215,21 +217,23 @@ int mode_manager(std::string option, std::string address, std::string mac_addr) 
 			std::string command = "";
 			std::cout << "1)Enter command" << std::endl;
 			std::cin >> command;
-			//send packet
+			//send syn packet to start hand shake
 			send_packet(address, mac_addr, option, false, identification_number);
 			//check for response
-			capture();
+			int ack_num = capture();
 			//enter command mode
+			int seq_num = 1;
 			identification_number = identification_number + 3;
 			while (command != "exit") {
 				for (int i = 0; i < command.length(); i++) {
 					command[i] = command[i] ^ 'H';
 				}
-				connected_mode_send(address, mac_addr, option, command, identification_number);
-				capture();
+				connected_mode_send(address, mac_addr, option, command, identification_number, seq_num, ack_num);
+				ack_num = ack_num + capture();
 				identification_number++;
 				std::cout << "1)Enter command" << std::endl;
 				std::cin >> command;
+				seq_num = command.length() + 12 +seq_num;
 			}
 		}
 		//enter connection-less mode
@@ -334,24 +338,25 @@ int capture() {
 										/////////infinite loop need to change///////////
 	//while (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
 	int return_val = -1;
+	int layer_five_len = 0;
 	while (return_val < 1){
 		if (pcap_next_ex(adhandle, &pktHeader, &pkt_data) >-1) {
 			//inspect packet
 			if (pktHeader->len > 0) {
-				return_val = decapsulate(pkt_data, pktHeader->caplen);
+				return_val = decapsulate(pkt_data, pktHeader->caplen, &layer_five_len);
 			}
 		}
 	}
 	///////////////////////////////////////////////
 
-	return 0;   // thread completed successfully
+	return layer_five_len;   // thread completed successfully
 }
 
 /*
 *Used to send ip packets
 *returns: success of packet being sent
 */
-int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num) {
+int connected_mode_send(std::string address, std::string mac_addr, std::string option, std::string command, int id_num, int seq_num, int ack_num) {
 	mac_values* values = (mac_values*)malloc((sizeof(int) * 6));
 	mac_values* mac_address = (mac_values*)malloc((sizeof(int) * 6));
 	get_mac(&values);
@@ -409,6 +414,18 @@ int connected_mode_send(std::string address, std::string mac_addr, std::string o
 			}
 			myfile.close();
 		}
+		//sequence number
+		packet[38] = seq_num / 16777216;
+		packet[39] = seq_num / 65536;
+		packet[40] = seq_num / 256;
+		packet[41] = seq_num % 256;
+
+		//sequence number
+		packet[42] = ack_num / 16777216;
+		packet[43] = ack_num / 65536;
+		packet[44] = ack_num / 256;
+		packet[45] = ack_num % 256;
+
 		//last byte in urgent pointer
 		packet[53] = 0;
 
@@ -736,7 +753,7 @@ int send_packet(std::string address, std::string mac_addr, std::string option, b
 *and call functions if needed
 *renturns nothing
 */
-int decapsulate(const u_char *data, int size) {
+int decapsulate(const u_char *data, int size, int* layer_five_len) {
 	eth_header* eth_hdr;
 	eth_hdr = (eth_header*)data;
 	IPv4* ih;
@@ -826,6 +843,9 @@ int decapsulate(const u_char *data, int size) {
 						//std::cout << tls_head->length << std::endl;
 						//int tls_data_len = ((tls_head->length & 0xFF) << 8) | ((tls_head->length >> 8) & 0xFF); //length of data
 						int tls_data_len = tls_head->length - 7;
+						//////////////////////error caused///////////////////
+						//(*layer_five_len) = tls_data_len + 12;
+						/////////////////////////////////////////////////////
 						u_char* data_char = ((u_char*)tls_head + 12); //pointer to one byte of data
 						std::string command; //string that will contain command used
 						//std::cout << tls_data_len << std::endl;
